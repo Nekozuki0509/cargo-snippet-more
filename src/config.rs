@@ -9,7 +9,7 @@ use crate::writer;
 use glob::glob;
 
 #[derive(Debug)]
-pub struct Config<'a> {
+pub struct SnippetConfig<'a> {
     pub target: Target<'a>,
     pub output_type: OutputType,
 }
@@ -29,9 +29,14 @@ pub enum OutputType {
     Ultisnips,
 }
 
-impl<'a> Config<'a> {
+#[derive(Debug)]
+pub struct BundleConfig<'a> {
+    pub target: &'a str,
+}
+
+impl<'a> SnippetConfig<'a> {
     pub fn from_matches(matches: &'a ArgMatches) -> Self {
-        Config {
+        SnippetConfig {
             target: Target::from_matches(matches),
             output_type: OutputType::from_matches(matches),
         }
@@ -110,6 +115,17 @@ impl OutputType {
             OutputType::Ultisnips => {
                 writer::write_ultisnips(snippets);
             }
+        }
+    }
+}
+
+impl<'a> BundleConfig<'a> {
+    pub fn from_matches(matches: &'a ArgMatches) -> Self {
+        Self {
+            target: matches
+                .subcommand_matches("bundle")
+                .and_then(|m| m.value_of("bin"))
+                .unwrap(),
         }
     }
 }

@@ -12,6 +12,8 @@ use log::error;
 
 use std::error::Error;
 
+use crate::config::{BundleConfig, SnippetConfig};
+
 /// Report error and continue.
 fn report_error<T, E: Error>(result: Result<T, E>) -> Option<T> {
     match result {
@@ -47,10 +49,29 @@ fn main() {
                         .possible_values(&["neosnippet", "vscode", "ultisnips"]),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("bundle")
+                .author(crate_authors!())
+                .about("Bundle snippets for a specific binary")
+                .arg(
+                    Arg::with_name("bin")
+                        .long("bin")
+                        .value_name("BINNAME")
+                        .help("The name of the binary to bundle")
+                        .required(true)
+                        .takes_value(true),
+                ),
+        )
         .get_matches();
 
-    let config = config::Config::from_matches(&matches);
+    match matches.subcommand_name() {
+        Some("snippet") => snippet(config::SnippetConfig::from_matches(&matches)),
+        Some("bundle") => bundle(config::BundleConfig::from_matches(&matches)),
+        _ => {}
+    }
+}
 
+fn snippet(config: SnippetConfig) {
     // Alphabetical order
     let mut snippets = Vec::new();
 
@@ -58,16 +79,19 @@ fn main() {
     for path in config.target.iter_paths() {
         buf.clear();
         log::info!("Start read {:?}", &path);
-        if let Some(mut file) = report_error(fs::File::open(path)) {
-            if report_error(file.read_to_string(&mut buf)).is_some() {
-                if let Some(mut parsed) = report_error(parser::parse_snippet(&buf)) {
-                    snippets.append(&mut parsed);
-                }
-            }
+        if let Some(mut file) = report_error(fs::File::open(path))
+                && report_error(file.read_to_string(&mut buf)).is_some()
+                && let Some(mut parsed) = report_error(parser::parse_snippet(&buf))
+        {
+            snippets.append(&mut parsed);
         }
     }
 
     config
         .output_type
         .write(&snippet::process_snippets(&snippets));
+}
+
+fn bundle(config: BundleConfig) {
+    todo!()
 }
