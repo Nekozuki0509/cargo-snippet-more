@@ -7,7 +7,7 @@ mod writer;
 use std::fs;
 use std::io::Read;
 
-use clap::{crate_authors, crate_version, App, AppSettings, Arg, SubCommand};
+use clap::{App, AppSettings, Arg, SubCommand, crate_authors, crate_version};
 use log::error;
 
 use std::error::Error;
@@ -80,8 +80,8 @@ fn snippet(config: SnippetConfig) {
         buf.clear();
         log::info!("Start read {:?}", &path);
         if let Some(mut file) = report_error(fs::File::open(path))
-                && report_error(file.read_to_string(&mut buf)).is_some()
-                && let Some(mut parsed) = report_error(parser::parse_snippet(&buf))
+            && report_error(file.read_to_string(&mut buf)).is_some()
+            && let Some(mut parsed) = report_error(parser::parse_snippet(&buf))
         {
             snippets.append(&mut parsed);
         }

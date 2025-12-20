@@ -66,7 +66,7 @@ impl<'a> Target<'a> {
                     })
                 })
                 .unwrap_or_else(|| Box::new(iter::empty())),
-            Target::Paths(ref v) => Box::new(
+            Target::Paths(v) => Box::new(
                 v.clone()
                     .into_iter()
                     .filter_map(|s| {

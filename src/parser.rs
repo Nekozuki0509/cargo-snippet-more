@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::ToTokens;
 use regex::{Captures, Regex};
-use syn::{parse_file, Attribute, File, Item, Meta, MetaList, NestedMeta};
+use syn::{Attribute, File, Item, Meta, MetaList, NestedMeta, parse_file};
 
 use crate::snippet::{Snippet, SnippetAttributes};
 use std::collections::HashSet;
@@ -20,7 +20,7 @@ macro_rules! get_attrs_impl {
         {
             match $arg {
                 $(
-                    $v(ref x) => Some(&x.attrs),
+                    &$v(ref x) => Some(&x.attrs),
                 )*
                 _ => None
             }
@@ -55,7 +55,7 @@ macro_rules! remove_snippet_attr_impl {
         {
             match $arg {
                 $(
-                    $v(ref mut x) => {
+                    &mut $v(ref mut x) => {
                         x.attrs.retain(|attr| {
                             attr.parse_meta().map(|m| !is_snippet_path(m.path().to_token_stream().to_string().as_str())).unwrap_or(true)
                         });
@@ -87,7 +87,7 @@ fn remove_snippet_attr(item: &mut Item) {
         Item::Macro2
     );
 
-    if let Item::Mod(ref mut item_mod) = item {
+    if let Item::Mod(item_mod) = item {
         if let Some(&mut (_, ref mut items)) = item_mod.content.as_mut() {
             items.iter_mut().for_each(|item| remove_snippet_attr(item));
         }
@@ -108,11 +108,11 @@ macro_rules! get_default_snippet_name_impl {
     ($arg:expr, $($v: path), *) => {
         match $arg {
             $(
-                $v(ref x) => {
+                &$v(ref x) => {
                     Some(x.ident.to_string())
                 },
             )*
-            Item::Fn(ref x) => {
+            &Item::Fn(ref x) => {
                 Some(x.sig.ident.to_string())
             }
             _ => None
@@ -145,7 +145,7 @@ fn get_snippet_name(attr: &Attribute) -> Option<String> {
                 .nested
                 .iter()
                 .filter_map(|item| match item {
-                    NestedMeta::Meta(Meta::NameValue(ref nv)) => {
+                    NestedMeta::Meta(Meta::NameValue(nv)) => {
                         if nv.path.to_token_stream().to_string() == "name" {
                             Some(unquote(&nv.lit.clone().into_token_stream().to_string()))
                         } else {
@@ -177,7 +177,7 @@ fn get_snippet_uses(attr: &Attribute) -> Option<Vec<String>> {
                 .nested
                 .iter()
                 .filter_map(|item| {
-                    if let NestedMeta::Meta(Meta::NameValue(ref nv)) = item {
+                    if let NestedMeta::Meta(Meta::NameValue(nv)) = item {
                         // It can't use "use" keyword here xD.
                         // It is reserved.
                         if nv.path.to_token_stream().to_string() == "include" {
@@ -216,7 +216,7 @@ fn get_simple_attr(attr: &Attribute, key: &str) -> Vec<String> {
                     .nested
                     .iter()
                     .filter_map(|item| {
-                        if let NestedMeta::Meta(Meta::NameValue(ref nv)) = item {
+                        if let NestedMeta::Meta(Meta::NameValue(nv)) = item {
                             if nv.path.to_token_stream().to_string() == key {
                                 let value = if let syn::Lit::Str(s) = &nv.lit.clone() {
                                     s.value()
@@ -303,8 +303,8 @@ fn parse_attrs(
             return false;
         }
         match meta {
-            Meta::List(MetaList { ref nested, .. }) => nested.iter().any(|n|
-                matches!(n, NestedMeta::Meta(Meta::Path(ref p)) if p.to_token_stream().to_string() == "doc_hidden")
+            Meta::List(MetaList { nested, .. }) => nested.iter().any(|n|
+                matches!(n, NestedMeta::Meta(Meta::Path(p)) if p.to_token_stream().to_string() == "doc_hidden")
             ),
             _ => false,
         }
@@ -320,7 +320,7 @@ fn parse_attrs(
 
 fn next_token_is_doc(token: &TokenTree) -> bool {
     match token {
-        TokenTree::Group(ref g) => g.to_string().starts_with("[doc = "),
+        TokenTree::Group(g) => g.to_string().starts_with("[doc = "),
         _ => false,
     }
 }
