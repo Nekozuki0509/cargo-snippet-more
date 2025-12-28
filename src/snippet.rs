@@ -33,6 +33,7 @@ pub fn process_snippets(snips: &[Snippet]) -> BTreeMap<String, String> {
         for name in &snip.attrs.names {
             let s = pre.entry(name.clone()).or_default();
             s.prefix += &snip.attrs.prefix;
+            s.content += &format!("#[cargo_snippet::expanded(\"{}\")]", name);
             s.content += &snip.content;
 
             for dep in &snip.attrs.uses {
@@ -56,7 +57,9 @@ pub fn process_snippets(snips: &[Snippet]) -> BTreeMap<String, String> {
                 if let Some(c) = &pre.get(&dep) {
                     // *res.entry(name.clone()).or_insert_with(String::new) += c.as_str();
                     let s = res.entry(name.clone()).or_default();
+
                     s.prefix += &c.prefix;
+                    s.content += &"#[rustfmt::skip]";
                     s.content += &c.content;
 
                     if let Some(ds) = deps.get(&dep) {

@@ -8,3 +8,8 @@ pub fn snippet(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // We do nothing here.
     item
 }
+
+#[proc_macro_attribute]
+pub fn expanded(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}

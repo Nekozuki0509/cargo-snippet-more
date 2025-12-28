@@ -20,11 +20,14 @@ pub fn format_src(src: &str) -> Option<String> {
     let mut out = Vec::with_capacity(src.len() * 2);
     let input = rustfmt_nightly::Input::Text(src.into());
 
+    //dbg!("inner_rustfmt");
     if rustfmt_nightly::Session::new(rustfmt_config, Some(&mut out))
         .format(input)
         .is_ok()
     {
-        String::from_utf8(out).ok().map(|s| s.replace("\r\n", "\n"))
+        String::from_utf8(out)
+            .ok()
+            .map(|s| s.replace("\r\n", "\n").replace("#[rustfmt::skip]", ""))
     } else {
         None
     }
@@ -35,6 +38,7 @@ pub fn format_src(src: &str) -> Option<String> {
     use std::io::Write;
     use std::process;
 
+    //dbg!("not inner_rustfmt");
     let mut command = process::Command::new("rustfmt")
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
@@ -56,7 +60,7 @@ pub fn format_src(src: &str) -> Option<String> {
 
     let stdout = out.stdout;
     let out = String::from_utf8(stdout).ok()?;
-    Some(out.replace("\r\n", "\n"))
+    Some(out.replace("\r\n", "\n").replace("#[rustfmt::skip]", ""))
 }
 
 pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {
