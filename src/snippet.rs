@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashSet},
+    path::PathBuf,
+};
 
 #[derive(Debug)]
 pub struct SnippetAttributes {
@@ -19,7 +22,7 @@ pub struct Snippet {
     pub content: String,
 }
 
-pub fn process_snippets(snips: &[Snippet]) -> BTreeMap<String, String> {
+pub fn process_snippets(snips: &[(PathBuf, Snippet)]) -> BTreeMap<String, String> {
     #[derive(Default, Clone, Debug)]
     struct Snip {
         prefix: String,
@@ -29,7 +32,7 @@ pub fn process_snippets(snips: &[Snippet]) -> BTreeMap<String, String> {
     let mut pre: BTreeMap<String, Snip> = BTreeMap::new();
     let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
-    for snip in snips {
+    for (puth, snip) in snips {
         for name in &snip.attrs.names {
             let s = pre.entry(name.clone()).or_default();
             s.prefix += &snip.attrs.prefix;

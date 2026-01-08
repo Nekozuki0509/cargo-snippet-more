@@ -4,8 +4,8 @@ mod parser;
 mod snippet;
 mod writer;
 
-use std::fs;
 use std::io::Read;
+use std::{fs, path::PathBuf};
 
 use clap::{App, AppSettings, Arg, SubCommand, crate_authors, crate_version};
 use log::error;
@@ -73,17 +73,28 @@ fn main() {
 
 fn snippet(config: SnippetConfig) {
     // Alphabetical order
-    let mut snippets = Vec::new();
+    let mut snippets = vec![];
 
     let mut buf = String::new();
     for path in config.target.iter_paths() {
+        dbg!(&path);
+        let components: Vec<_> = path.components().collect();
+
+        let pos = components.iter().position(|c| c.as_os_str() == "src")?;
+        let result = if pos + 1 < components.len() {
+            Ok(components[pos + 1..].iter().collect::<PathBuf>())
+        } else {
+            Err(format!("could not find src directory in path: {}", &path))
+        };
+
         buf.clear();
         log::info!("Start read {:?}", &path);
-        if let Some(mut file) = report_error(fs::File::open(path))
+        if let Some(use_path) = report_error(result)
+            && let Some(mut file) = report_error(fs::File::open(path))
             && report_error(file.read_to_string(&mut buf)).is_some()
             && let Some(mut parsed) = report_error(parser::parse_snippet(&buf))
         {
-            snippets.append(&mut parsed);
+            snippets.push((use_path, parsed));
         }
     }
 
