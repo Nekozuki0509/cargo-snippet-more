@@ -1,7 +1,6 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
-    path::PathBuf,
-};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+use crate::library::Libraries;
 
 #[derive(Debug)]
 pub struct SnippetAttributes {
@@ -17,36 +16,68 @@ pub struct SnippetAttributes {
 
 #[derive(Debug)]
 pub struct Snippet {
+    pub name: String,
     pub attrs: SnippetAttributes,
     // Snippet content (Not formated)
     pub content: String,
 }
 
-pub fn process_snippets(snips: &[(PathBuf, Snippet)]) -> BTreeMap<String, String> {
+#[derive(Debug, Default)]
+pub struct Lib {
+    pub name: String,
+    pub path: Vec<String>,
+    pub content: String,
+}
+
+pub fn process_snippets(
+    snips: Vec<(Vec<String>, Vec<Snippet>)>,
+) -> (Libraries, BTreeMap<String, String>) {
     #[derive(Default, Clone, Debug)]
     struct Snip {
         prefix: String,
         content: String,
     }
 
+    let mut libs = BTreeMap::new();
     let mut pre: BTreeMap<String, Snip> = BTreeMap::new();
     let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
-    for (puth, snip) in snips {
-        for name in &snip.attrs.names {
-            let s = pre.entry(name.clone()).or_default();
-            s.prefix += &snip.attrs.prefix;
-            s.content += &format!("#[cargo_snippet::expanded(\"{}\")]", name);
-            s.content += &snip.content;
+    for (path, snip_vec) in snips {
+        for snip in snip_vec {
+            for name in &snip.attrs.names {
+                if !libs.contains_key(name) {
+                    libs.insert(
+                        name.clone(),
+                        Lib {
+                            path: path.clone(),
+                            name: snip.name.clone(),
+                            content: String::new(),
+                        },
+                    );
+                }
 
-            for dep in &snip.attrs.uses {
-                deps.entry(name.clone())
-                    .or_insert_with(BTreeSet::new)
-                    .insert(dep.clone());
+                let l = libs.entry(name.clone()).or_default();
+                l.content += &snip.attrs.prefix;
+                l.content += &snip.content;
+
+                let s = pre.entry(name.clone()).or_default();
+                s.prefix += &snip.attrs.prefix;
+                if s.content.is_empty() {
+                    s.content += &format!("#[cargo_snippet::expanded(\"{}\")]", name);
+                }
+                s.content += &snip.content;
+
+                for dep in &snip.attrs.uses {
+                    deps.entry(name.clone())
+                        .or_insert_with(BTreeSet::new)
+                        .insert(dep.clone());
+                }
             }
         }
     }
 
+    let mut library = Libraries::new();
+    library.push(libs, &deps);
     let mut res: BTreeMap<String, Snip> = BTreeMap::new();
 
     for (name, uses) in &deps {
@@ -81,12 +112,15 @@ pub fn process_snippets(snips: &[(PathBuf, Snippet)]) -> BTreeMap<String, String
 
     for (name, snip) in pre {
         // Dependency first
-        let s = res.entry(name).or_default();
+        let s = res.entry(name.clone()).or_default();
         s.prefix += snip.prefix.as_str();
         s.content += snip.content.as_str();
     }
 
-    res.into_iter()
-        .map(|(k, v)| (k, v.prefix + v.content.as_str()))
-        .collect()
+    (
+        library,
+        res.into_iter()
+            .map(|(k, v)| (k, v.prefix + v.content.as_str()))
+            .collect(),
+    )
 }

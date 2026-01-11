@@ -1,0 +1,29 @@
+[childs.common.childs]
+
+[childs.common.files.gcd]
+dependencies = ["gcd"]
+content = "pub fn gcd (a : u64 , b : u64 ) -> u64 {if b == 0 {a } else {gcd (b , a % b ) } } pub fn gcd_list (list : & [u64 ] ) -> u64 {list . iter () . fold (list [0 ] , | a , & b | gcd (a , b ) ) } pub fn lcm (a : u64 , b : u64 ) -> u64 {a / gcd (a , b ) * b } "
+
+[childs.common.files.gcd_list]
+dependencies = ["gcd"]
+content = "pub fn gcd_list (list : & [u64 ] ) -> u64 {list . iter () . fold (list [0 ] , | a , & b | gcd (a , b ) ) } "
+
+[childs.common.files.lcm]
+dependencies = []
+content = "pub fn lcm (a : u64 , b : u64 ) -> u64 {a / gcd (a , b ) * b } "
+
+[childs.graph.childs]
+
+[childs.graph.files.UnionFind]
+dependencies = []
+content = "struct UnionFind {par : Vec < usize > , siz : Vec < usize > , } impl UnionFind {fn new (n : usize ) -> Self {Self {par : (0 .. n ) . collect () , siz : vec ! [1 ; n ] , } } fn root (& mut self , x : usize ) -> usize {if self . par [x ] == x {return x ; } self . par [x ] = self . root (self . par [x ] ) ; self . par [x ] } fn unite (& mut self , mut parent : usize , mut child : usize ) -> usize {parent = self . root (parent ) ; child = self . root (child ) ; if parent == child {return parent ; } if self . siz [parent ] < self . siz [child ] {swap (& mut parent , & mut child ) ; } self . par [child ] = parent ; self . siz [parent ] += self . siz [child ] ; parent } fn is_same (& mut self , u : usize , v : usize ) -> bool {self . root (u ) == self . root (v ) } fn size (& mut self , x : usize ) -> usize {let root = self . root (x ) ; self . siz [root ] } } "
+
+[childs.graph.files.bfs]
+dependencies = []
+content = "fn bfs () {let n = 0 ; let g = vec ! [vec ! [] ] ; let mut dist = vec ! [! 0 ; n ] ; let mut q = VecDeque :: new () ; q . push_back (0 ) ; dist [0 ] = 0 ; while let Some (pos ) = q . pop_front () {for & i in & g [pos ] {if dist [i ] == - 1 {dist [i ] = dist [pos ] + 1 ; q . push_back (i ) ; } } } } "
+
+[childs.graph.files.dfs]
+dependencies = []
+content = "fn dfs (pos : usize , g : & Vec < Vec < usize > > , visited : & mut Vec < bool > ) {visited [pos ] = true ; for & i in & g [pos ] {if ! visited [i ] {dfs (i , g , visited ) ; } } } "
+
+[files]

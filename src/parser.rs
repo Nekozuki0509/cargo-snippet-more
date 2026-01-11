@@ -462,12 +462,14 @@ fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
 // Get snippet names and snippet code (not formatted)
 fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     let default_name = get_default_snippet_name(&item);
-    let snip_attrs = get_attrs(&item).and_then(|attrs| parse_attrs(attrs.as_slice(), default_name));
+    let snip_attrs =
+        get_attrs(&item).and_then(|attrs| parse_attrs(attrs.as_slice(), default_name.clone()));
 
     snip_attrs.map(|attrs| {
         remove_snippet_attr(&mut item);
         let doc_hidden = attrs.doc_hidden;
         Snippet {
+            name: default_name.unwrap_or_default(),
             attrs,
             content: stringify_tokens(item.into_token_stream(), doc_hidden),
         }
@@ -495,7 +497,6 @@ fn get_snippet_from_item_recursive(item: Item) -> Vec<Snippet> {
 
 fn get_snippet_from_file(file: File) -> Vec<Snippet> {
     let mut res = Vec::new();
-
     // whole code is snippet
     if let Some(attrs) = parse_attrs(&file.attrs, None) {
         let mut file = file.clone();
@@ -509,6 +510,7 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
         });
         let doc_hidden = attrs.doc_hidden;
         res.push(Snippet {
+            name: String::new(),
             attrs,
             content: stringify_tokens(file.into_token_stream(), doc_hidden),
         })
