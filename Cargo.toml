@@ -1,12 +1,12 @@
 [package]
-name = "cargo-snippet"
-version = "0.6.5"
+name = "cargo-snippet-more"
+version = "1.0.0"
 authors = ["hatoo <hato2000@gmail.com>"]
 repository = "https://github.com/hatoo/cargo-snippet.git"
-keywords = ["subcommand", "cargo-subcommand", "cargo", "snippet", "competitive"]
+keywords = ["subcommand", "cargo-subcommand", "cargo", "snippet", "competitive", "bundler"]
 license = "MIT"
 readme = "README.md"
-description = "A snippet extractor for competitive programmers"
+description = "A fork of cargo-snippet that added bundle and more snippet feature"
 categories = ["template-engine"]
 edition = "2024"
 
@@ -15,7 +15,7 @@ proc-macro = true
 path = "src/lib.rs"
 
 [[bin]]
-name = "cargo-snippet"
+name = "cargo-snippet-more"
 path = "src/main.rs"
 required-features = ["binaries"]
 
