@@ -1,12 +1,14 @@
+use anyhow::Context;
 use lazy_static::lazy_static;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::ToTokens;
 use regex::{Captures, Regex};
 use syn::{Attribute, File, Item, Meta, MetaList, NestedMeta, parse_file};
 
-use crate::snippet::{Snippet, SnippetAttributes};
 use std::collections::HashSet;
 use std::{char, u32};
+
+use crate::snippet::snippet::{Snippet, SnippetAttributes};
 
 fn is_snippet_path(path: &str) -> bool {
     match path {
@@ -94,7 +96,7 @@ fn remove_snippet_attr(item: &mut Item) {
     }
 }
 
-fn unquote(s: &str) -> String {
+pub fn unquote(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
 
     if chars.len() >= 2 && chars.first() == Some(&'"') && chars.last() == Some(&'"') {
@@ -525,8 +527,8 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
     res
 }
 
-pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, syn::parse::Error> {
-    parse_file(src).map(get_snippet_from_file)
+pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
+    parse_file(src).map(get_snippet_from_file).context("")
 }
 
 #[cfg(test)]

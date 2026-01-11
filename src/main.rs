@@ -1,22 +1,25 @@
-mod config;
-mod fsutil;
-mod library;
-mod parser;
+mod bundle;
 mod snippet;
-mod writer;
 
-use std::io::{self, Read};
-use std::fs;
+use std::collections::BTreeMap;
+use std::fs::{self, File, read_to_string};
+use std::io::{self, Read, Write};
 
+use anyhow::{Context, Error};
 use clap::{App, AppSettings, Arg, SubCommand, crate_authors, crate_version};
 use log::error;
+use regex::Regex;
 
-use std::error::Error;
-
-use crate::config::{BundleConfig, SnippetConfig};
+use crate::bundle::config::BundleConfig;
+use crate::bundle::data::Data;
+use crate::bundle::meta;
+use crate::bundle::parser::get_should_bundle;
+use crate::snippet::config::SnippetConfig;
+use crate::snippet::parser::parse_snippet;
+use crate::snippet::snippet::process_snippets;
 
 /// Report error and continue.
-fn report_error<T, E: Error>(result: Result<T, E>) -> Option<T> {
+fn report_error<T>(result: Result<T, Error>) -> Option<T> {
     match result {
         Ok(x) => Some(x),
         Err(e) => {
@@ -66,8 +69,8 @@ fn main() {
         .get_matches();
 
     match matches.subcommand_name() {
-        Some("snippet") => snippet(config::SnippetConfig::from_matches(&matches)),
-        Some("bundle") => bundle(config::BundleConfig::from_matches(&matches)),
+        Some("snippet") => snippet(SnippetConfig::from_matches(&matches)),
+        Some("bundle") => bundle(BundleConfig::from_matches(&matches)),
         _ => {}
     }
 }
@@ -95,29 +98,67 @@ fn snippet(config: SnippetConfig) {
                 })
                 .collect::<Vec<_>>())
         } else {
-            Err(io::Error::new(
+            Err(Error::new(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("could not find src directory in path: {}", &path.display()),
-            ))
+            )))
         };
 
         buf.clear();
         log::info!("Start read {:?}", &path);
         if let Some(use_path) = report_error(result)
-            && let Some(mut file) = report_error(fs::File::open(path))
-            && report_error(file.read_to_string(&mut buf)).is_some()
-            && let Some(parsed) = report_error(parser::parse_snippet(&buf))
+            && let Some(mut file) = report_error(fs::File::open(path).context(""))
+            && report_error(file.read_to_string(&mut buf).context("")).is_some()
+            && let Some(parsed) = report_error(parse_snippet(&buf))
         {
             snippets.push((use_path, parsed));
         }
     }
 
-    let (libraries, snips) = &snippet::process_snippets(snippets);
+    let (data, snips) = &process_snippets(snippets);
     config.output_type.write(snips);
 
-    report_error(libraries.write());
+    report_error(data.write());
 }
 
 fn bundle(config: BundleConfig) {
-    todo!()
+    let Some(metas) = report_error(meta::get_data(&config)) else {
+        return;
+    };
+
+    let mut data = BTreeMap::new();
+    for (name, content) in metas.library {
+        if let Some(x) = report_error(Data::read(&content)) {
+            data.insert(name, x);
+        }
+    }
+
+    let Some(mut content) = report_error(read_to_string(metas.bin.as_str()).context("")) else {
+        return;
+    };
+
+    let Some(bundle_content) = report_error(get_should_bundle(&content, &data)) else {
+        return;
+    };
+
+    for (name, _) in data {
+        let re = Regex::new(&format!("use {}.*;", &name)).unwrap();
+        content = re.replace_all(&content, "/* $0 */").to_string();
+    }
+
+    let re = Regex::new("#[cargo_snippet::expanded=\".*\"]").unwrap();
+    content = re.replace_all(&content, "/* $0 */").to_string();
+
+    content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n";
+    content += &bundle_content;
+
+    let _ = fs::create_dir_all("src/cargo-snippet-more");
+    let Some(mut file) = report_error(
+        File::create(&format!("src/cargo-snippet-more/{}.rs", config.target)).context(""),
+    ) else {
+        return;
+    };
+
+    report_error(write!(file, "{}", content).context(""));
+    report_error(file.flush().context(""));
 }

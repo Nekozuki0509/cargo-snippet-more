@@ -4,9 +4,10 @@ use std::fs;
 use std::iter;
 use std::path::{Path, PathBuf};
 
-use crate::fsutil;
-use crate::writer;
 use glob::glob;
+
+use crate::snippet::fsutil;
+use crate::snippet::writer;
 
 #[derive(Debug)]
 pub struct SnippetConfig<'a> {
@@ -27,11 +28,6 @@ pub enum OutputType {
     Neosnippet,
     VScode,
     Ultisnips,
-}
-
-#[derive(Debug)]
-pub struct BundleConfig<'a> {
-    pub target: &'a str,
 }
 
 impl<'a> SnippetConfig<'a> {
@@ -115,17 +111,6 @@ impl OutputType {
             OutputType::Ultisnips => {
                 writer::write_ultisnips(snippets);
             }
-        }
-    }
-}
-
-impl<'a> BundleConfig<'a> {
-    pub fn from_matches(matches: &'a ArgMatches) -> Self {
-        Self {
-            target: matches
-                .subcommand_matches("bundle")
-                .and_then(|m| m.value_of("bin"))
-                .unwrap(),
         }
     }
 }
