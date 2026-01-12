@@ -2,13 +2,15 @@ mod bundle;
 mod snippet;
 
 use std::collections::BTreeMap;
-use std::fs::{self, File, read_to_string};
+use std::fs::{self, File, read_to_string, write};
 use std::io::{self, Read, Write};
 
-use anyhow::{Context, Error};
+use anyhow::{Context, Error, Result};
 use clap::{App, AppSettings, Arg, SubCommand, crate_authors, crate_version};
 use log::error;
 use regex::Regex;
+use toml::Value;
+use toml::map::Map;
 
 use crate::bundle::config::BundleConfig;
 use crate::bundle::data::Data;
@@ -56,7 +58,7 @@ fn main() {
         .subcommand(
             SubCommand::with_name("bundle")
                 .author(crate_authors!())
-                .about("Bundle snippets for a specific binary")
+                .about("Bundle library for a specific binary")
                 .arg(
                     Arg::with_name("bin")
                         .long("bin")
@@ -66,11 +68,17 @@ fn main() {
                         .takes_value(true),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("init")
+                .author(crate_authors!())
+                .about("initialize current directory for bundling"),
+        )
         .get_matches();
 
     match matches.subcommand_name() {
         Some("snippet") => snippet(SnippetConfig::from_matches(&matches)),
-        Some("bundle") => bundle(BundleConfig::from_matches(&matches)),
+        Some("bundle") => report_error(bundle(BundleConfig::from_matches(&matches))).unwrap_or(()),
+        Some("init") => report_error(init()).unwrap_or(()),
         _ => {}
     }
 }
@@ -121,10 +129,8 @@ fn snippet(config: SnippetConfig) {
     report_error(data.write());
 }
 
-fn bundle(config: BundleConfig) {
-    let Some(metas) = report_error(meta::get_data(&config)) else {
-        return;
-    };
+fn bundle(config: BundleConfig) -> Result<()> {
+    let metas = meta::get_data(&config)?;
 
     let mut data = BTreeMap::new();
     for (name, content) in metas.library {
@@ -133,14 +139,8 @@ fn bundle(config: BundleConfig) {
         }
     }
 
-    let Some(mut content) = report_error(read_to_string(metas.bin.as_str()).context("")) else {
-        return;
-    };
-
-    let Some(bundle_content) = report_error(get_should_bundle(&content, &data)) else {
-        return;
-    };
-
+    let mut content = read_to_string(metas.bin.as_str())?;
+    let bundle_content = get_should_bundle(&content, &data)?;
     for (name, _) in data {
         let re = Regex::new(&format!("use {}.*;", &name)).unwrap();
         content = re.replace_all(&content, "/* $0 */").to_string();
@@ -153,12 +153,60 @@ fn bundle(config: BundleConfig) {
     content += &bundle_content;
 
     let _ = fs::create_dir_all("src/cargo-snippet-more");
-    let Some(mut file) = report_error(
-        File::create(&format!("src/cargo-snippet-more/{}.rs", config.target)).context(""),
-    ) else {
-        return;
-    };
+    let mut file = File::create(&format!("src/cargo-snippet-more/{}.rs", config.target))?;
 
-    report_error(write!(file, "{}", content).context(""));
-    report_error(file.flush().context(""));
+    write!(file, "{}", content)?;
+    file.flush()?;
+
+    Ok(())
+}
+
+fn init() -> Result<()> {
+    let mut doc: Value = toml::from_str(&read_to_string("Cargo.toml")?)?;
+    let newbins;
+
+    {
+        let bintable = doc
+            .get_mut("package")
+            .and_then(|x| x.get_mut("metadata"))
+            .and_then(|x| x.get_mut("cargo-compete"))
+            .and_then(|x| x.get_mut("bin"))
+            .and_then(|x| x.as_table_mut())
+            .context("")?;
+
+        newbins = bintable
+            .iter()
+            .filter_map(|(name, table)| {
+                let table = table.as_table()?;
+                let alias = table.get("alias")?;
+                let problem = table.get("problem")?;
+                Some((name.to_string(), alias.clone(), problem.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        for (name, alias, problem) in &newbins {
+            let mut entry = Map::new();
+            entry.insert("alias".to_string(), alias.clone());
+            entry.insert("problem".to_string(), problem.clone());
+            bintable.insert(format!("{}-more", name), Value::Table(entry));
+        }
+    }
+
+    {
+        let bins = doc.get_mut("bin").context("")?.as_array_mut().context("")?;
+        for (name, _, _) in newbins {
+            let mut entry = Map::new();
+            entry.insert("name".to_string(), Value::String(format!("{}-more", name)));
+            entry.insert(
+                "path".to_string(),
+                Value::String(format!("src/cargo-snippet-more/{}.rs", name)),
+            );
+
+            bins.push(Value::Table(entry));
+        }
+    }
+
+    write("Cargo.toml", toml::to_string(&doc).context("")?)?;
+
+    Ok(())
 }
