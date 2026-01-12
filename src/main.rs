@@ -146,7 +146,7 @@ fn bundle(config: BundleConfig) -> Result<()> {
         content = re.replace_all(&content, "/* $0 */").to_string();
     }
 
-    let re = Regex::new("#[cargo_snippet::expanded=\".*\"]").unwrap();
+    let re = Regex::new("#\\[cargo_snippet_more::expanded\\(\".*\"\\)\\]").unwrap();
     content = re.replace_all(&content, "/* $0 */").to_string();
 
     content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n";

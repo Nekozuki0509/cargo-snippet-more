@@ -12,7 +12,7 @@ use crate::snippet::snippet::{Snippet, SnippetAttributes};
 
 fn is_snippet_path(path: &str) -> bool {
     match path {
-        "snippet" | "cargo_snippet :: snippet" => true,
+        "snippet" | "cargo_snippet_more :: snippet" => true,
         _ => false,
     }
 }

@@ -63,7 +63,7 @@ pub fn process_snippets(
                 let s = pre.entry(name.clone()).or_default();
                 s.prefix += &snip.attrs.prefix;
                 if s.content.is_empty() {
-                    s.content += &format!("#[cargo_snippet::expanded=\"{}\"]", name);
+                    s.content += &format!("#[cargo_snippet_more::expanded(\"{}\")]", name);
                 }
                 s.content += &snip.content;
 

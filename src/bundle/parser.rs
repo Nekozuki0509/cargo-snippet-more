@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Result;
 use quote::ToTokens;
-use syn::{Attribute, ItemUse, Meta, UseGroup, UsePath, UseTree, visit::Visit};
+use syn::{Attribute, ItemUse, Meta, NestedMeta, UseGroup, UsePath, UseTree, visit::Visit};
 
 use crate::{
     bundle::data::{Data, UseType},
@@ -59,11 +59,12 @@ impl Visitor {
         for attr in attrs {
             if let Ok(metaitem) = attr.parse_meta()
                 && metaitem.path().to_token_stream().to_string().as_str()
-                    == "cargo_snippet :: expanded"
-                && let Meta::NameValue(nv) = metaitem
+                    == "cargo_snippet_more :: expanded"
+                && let Meta::List(list) = metaitem
+                && let NestedMeta::Lit(lit) = &list.nested[0]
             {
                 self.expanded_names
-                    .insert(unquote(&nv.lit.into_token_stream().to_string()));
+                    .insert(unquote(lit.into_token_stream().to_string().as_str()));
             }
         }
     }
@@ -72,7 +73,78 @@ impl Visitor {
 impl<'ast> Visit<'ast> for Visitor {
     fn visit_item_use(&mut self, node: &'ast ItemUse) {
         self.use_items.push(node.clone());
+        self.process_attributes(&node.attrs);
         syn::visit::visit_item_use(self, node);
+    }
+
+    fn visit_item_extern_crate(&mut self, node: &'ast syn::ItemExternCrate) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_extern_crate(self, node);
+    }
+
+    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_static(self, node);
+    }
+
+    fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_const(self, node);
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_mod(self, node);
+    }
+
+    fn visit_item_foreign_mod(&mut self, node: &'ast syn::ItemForeignMod) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_foreign_mod(self, node);
+    }
+
+    fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_type(self, node);
+    }
+
+    fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_struct(self, node);
+    }
+
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_item_union(&mut self, node: &'ast syn::ItemUnion) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_union(self, node);
+    }
+
+    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_trait(self, node);
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_impl(self, node);
+    }
+
+    fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_macro(self, node);
+    }
+
+    fn visit_item_macro2(&mut self, node: &'ast syn::ItemMacro2) {
+        self.process_attributes(&node.attrs);
+        syn::visit::visit_item_macro2(self, node);
     }
 }
 
@@ -87,7 +159,6 @@ pub fn get_should_bundle(content: &String, data: &BTreeMap<String, Data>) -> Res
         let mut path = vec![];
         Visitor::extract_use(&use_item.tree, &mut path, &mut use_results, data);
     }
-    visitor.process_attributes(&syntax_tree.attrs);
 
     let mut needs_results = BTreeMap::new();
     extract_needs(use_results, &mut needs_results, data);
