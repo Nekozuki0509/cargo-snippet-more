@@ -8,6 +8,7 @@ pub struct SnippetAttributes {
     pub names: HashSet<String>,
     // Dependencies
     pub uses: HashSet<String>,
+    pub not_library: HashSet<String>,
     // Prefix for snippet. It's will be emitted prior to the snippet.
     pub prefix: String,
     // Whether doc comments associated with this snippet should be hidden or not.
@@ -45,20 +46,22 @@ pub fn process_snippets(
     for (path, snip_vec) in snips {
         for snip in snip_vec {
             for name in &snip.attrs.names {
-                if !libs.contains_key(name) {
-                    libs.insert(
-                        name.clone(),
-                        Lib {
-                            path: path.clone(),
-                            name: snip.name.clone(),
-                            content: String::new(),
-                        },
-                    );
-                }
+                if !snip.attrs.not_library {
+                    if !libs.contains_key(name) {
+                        libs.insert(
+                            name.clone(),
+                            Lib {
+                                path: path.clone(),
+                                name: snip.name.clone(),
+                                content: String::new(),
+                            },
+                        );
+                    }
 
-                let l = libs.entry(name.clone()).or_default();
-                l.content += &snip.attrs.prefix;
-                l.content += &snip.content;
+                    let l = libs.entry(name.clone()).or_default();
+                    l.content += &snip.attrs.prefix;
+                    l.content += &snip.content;
+                }
 
                 let s = pre.entry(name.clone()).or_default();
                 s.prefix += &snip.attrs.prefix;
