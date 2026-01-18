@@ -10,6 +10,22 @@ use std::{char, u32};
 
 use crate::snippet::snippet::{Snippet, SnippetAttributes};
 
+struct Visitor {
+    source: &'a str,
+    lines: Vec<&'a str>,
+}
+
+impl<'a> Visitor<'a> {
+    fn new(source: &'a str) -> Self {
+        Self { source, lines: source.lines().collect() }
+    }
+
+    fn extract_line(&self, start: usize, end: usize) -> String {
+        self.lines[start - 1..end].join("\n")
+    }
+}
+
+
 fn is_snippet_path(path: &str) -> bool {
     match path {
         "snippet" | "cargo_snippet_more :: snippet" => true,

@@ -146,11 +146,19 @@ fn bundle(config: BundleConfig) -> Result<()> {
         content = re.replace_all(&content, "/* $0 */").to_string();
     }
 
+    let re = Regex::new("use cargo-snippet-more.*;").unwrap();
+    content = re.replace_all(&content, "/* $0 */").to_string();
+
     let re = Regex::new("#\\[cargo_snippet_more::expanded\\(\".*\"\\)\\]").unwrap();
     content = re.replace_all(&content, "/* $0 */").to_string();
 
-    content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n";
-    content += &bundle_content;
+    let re = Regex::new("#\\[expanded\\(\".*\"\\)\\]").unwrap();
+    content = re.replace_all(&content, "/* $0 */").to_string();
+
+    if !bundle_content.is_empty() {
+        content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n";
+        content += &bundle_content;
+    }
 
     let _ = fs::create_dir_all("src/cargo-snippet-more");
     let mut file = File::create(&format!("src/cargo-snippet-more/{}.rs", config.target))?;
