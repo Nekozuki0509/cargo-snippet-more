@@ -46,7 +46,7 @@ pub fn process_snippets(
     for (path, snip_vec) in snips {
         for snip in snip_vec {
             for name in &snip.attrs.names {
-                if !snip.attrs.not_library {
+                if !snip.attrs.not_library.contains(name) {
                     if !libs.contains_key(name) {
                         libs.insert(
                             name.clone(),

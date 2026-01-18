@@ -136,7 +136,7 @@ fn get_default_snippet_name(item: &Item) -> Option<String> {
 }
 
 fn get_snippet_name(attr: &Attribute) -> Option<String> {
-    attr.parse_meta().ok().and_then(get_snippet_name_from_meta)
+    attr.parse_meta().ok().as_ref().and_then(get_snippet_name_from_meta)
 }
 
 fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
@@ -164,7 +164,7 @@ fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
             })
             .next(),
         // #[snippet=".."]
-        Meta::NameValue(nv) => Some(unquote(&nv.lit.into_token_stream().to_string())),
+        Meta::NameValue(nv) => Some(unquote(&nv.lit.clone() .into_token_stream().to_string())),
         _ => None,
     }
 }
