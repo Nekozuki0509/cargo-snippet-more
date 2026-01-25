@@ -9,6 +9,7 @@ struct VScode {
 
 #[cfg(feature = "inner_rustfmt")]
 pub fn format_src(src: &str) -> Option<String> {
+    let src = format!("fn ___dummy___() {{{}}}", src);
     let mut rustfmt_config = rustfmt_nightly::Config::default();
     rustfmt_config
         .set()
@@ -20,14 +21,20 @@ pub fn format_src(src: &str) -> Option<String> {
     let mut out = Vec::with_capacity(src.len() * 2);
     let input = rustfmt_nightly::Input::Text(src.into());
 
-    //dbg!("inner_rustfmt");
     if rustfmt_nightly::Session::new(rustfmt_config, Some(&mut out))
         .format(input)
         .is_ok()
     {
-        String::from_utf8(out)
-            .ok()
-            .map(|s| s.replace("\r\n", "\n").replace("#[rustfmt::skip]", ""))
+        String::from_utf8(out).ok().map(|s| {
+            let mut lines = s
+                .replace("\r\n", "\n")
+                .replace("#[rustfmt::skip]", "")
+                .lines();
+
+            lines.next();
+            lines.next_back();
+            lines.collect::<Vec<_>>().join("\n")
+        })
     } else {
         None
     }
@@ -35,10 +42,11 @@ pub fn format_src(src: &str) -> Option<String> {
 
 #[cfg(not(feature = "inner_rustfmt"))]
 pub fn format_src(src: &str) -> Option<String> {
+    let src = format!("fn ___dummy___() {{{}}}", src);
+
     use std::io::Write;
     use std::process;
 
-    //dbg!("not inner_rustfmt");
     let mut command = process::Command::new("rustfmt")
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
@@ -60,7 +68,13 @@ pub fn format_src(src: &str) -> Option<String> {
 
     let stdout = out.stdout;
     let out = String::from_utf8(stdout).ok()?;
-    Some(out.replace("\r\n", "\n").replace("#[rustfmt::skip]", ""))
+    let replaced = out.replace("\r\n", "\n").replace("#[rustfmt::skip]", "");
+    let mut lines = replaced.lines();
+
+    lines.next();
+    lines.next_back();
+
+    Some(lines.collect::<Vec<_>>().join("\n"))
 }
 
 pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {

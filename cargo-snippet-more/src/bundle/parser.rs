@@ -4,8 +4,9 @@ use std::{
 };
 
 use anyhow::Result;
+use proc_macro2::TokenTree;
 use quote::ToTokens;
-use syn::{Attribute, Item, ItemUse, Meta, NestedMeta, UseGroup, UsePath, UseTree, visit::Visit};
+use syn::{ItemUse, Macro, UseGroup, UsePath, UseTree, visit::Visit};
 
 use crate::{
     bundle::data::{Data, UseType},
@@ -54,48 +55,22 @@ impl Visitor {
             _ => {}
         }
     }
-
-    fn process_attributes(&mut self, attrs: &[Attribute]) {
-        for attr in attrs {
-            if let Ok(metaitem) = attr.parse_meta()
-                && let name = metaitem.path().to_token_stream().to_string().as_str()
-                && (name == "cargo_snippet_more :: expanded" || name == "expanded")
-                && let Meta::List(list) = metaitem
-                && let NestedMeta::Lit(lit) = &list.nested[0]
-            {
-                self.expanded_names
-                    .insert(unquote(lit.into_token_stream().to_string().as_str()));
-            }
-        }
-    }
 }
 
 impl<'ast> Visit<'ast> for Visitor {
-    fn visit_item(&mut self, item: &'ast Item) {
-        match item {
-            Item::Use(i) => {
-                self.use_items.push(i.clone());
-                self.process_attributes(&i.attrs);
+    fn visit_macro(&mut self, mac: &'ast Macro) {
+        let path = mac.path.to_token_stream().to_string().replace(' ', "");
+
+        if (path == "cargo_snippet_more::expanded" || path == "expanded")
+            && let Some(TokenTree::Literal(lit)) = mac.tokens.clone().into_iter().next()
+        {
+            let value = lit.to_string();
+            if value.starts_with('"') {
+                self.expanded_names.insert(unquote(&value));
             }
-            Item::ExternCrate(i) => self.process_attributes(&i.attrs),
-            Item::Static(i) => self.process_attributes(&i.attrs),
-            Item::Const(i) => self.process_attributes(&i.attrs),
-            Item::Fn(i) => self.process_attributes(&i.attrs),
-            Item::Mod(i) => self.process_attributes(&i.attrs),
-            Item::ForeignMod(i) => self.process_attributes(&i.attrs),
-            Item::Type(i) => self.process_attributes(&i.attrs),
-            Item::Struct(i) => self.process_attributes(&i.attrs),
-            Item::Enum(i) => self.process_attributes(&i.attrs),
-            Item::Union(i) => self.process_attributes(&i.attrs),
-            Item::Trait(i) => self.process_attributes(&i.attrs),
-            Item::TraitAlias(i) => self.process_attributes(&i.attrs),
-            Item::Impl(i) => self.process_attributes(&i.attrs),
-            Item::Macro(i) => self.process_attributes(&i.attrs),
-            Item::Macro2(i) => self.process_attributes(&i.attrs),
-            _ => {}
         }
 
-        syn::visit::visit_item(self, item);
+        syn::visit::visit_macro(self, mac);
     }
 }
 

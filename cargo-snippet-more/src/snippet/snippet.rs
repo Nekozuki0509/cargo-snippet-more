@@ -49,7 +49,7 @@ pub fn process_snippets(
         for snip in snip_vec {
             let mut content = snip.content;
             let re = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;").unwrap();
-            content = re.replace_all(dbg!(&content), "").to_string();
+            content = re.replace_all(&content, "").to_string();
 
             for name in &snip.attrs.names {
                 if !snip.attrs.not_library.contains(name) {
@@ -72,7 +72,7 @@ pub fn process_snippets(
                 let s = pre.entry(name.clone()).or_default();
                 s.prefix += &snip.attrs.prefix;
                 if s.content.is_empty() {
-                    s.content += &format!("#[cargo_snippet_more::expanded(\"{}\")]", name);
+                    s.content += &format!("cargo_snippet_more::expanded!(\"{}\");", name);
                 }
                 s.content += &content;
 
