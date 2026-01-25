@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use regex::Regex;
+
 use crate::bundle::data::Data;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SnippetAttributes {
     // A snippet with multiple names is allowed but using dependency is recommended.
     pub names: HashSet<String>,
@@ -45,6 +47,10 @@ pub fn process_snippets(
 
     for (path, snip_vec) in snips {
         for snip in snip_vec {
+            let mut content = snip.content;
+            let re = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;").unwrap();
+            content = re.replace_all(dbg!(&content), "").to_string();
+
             for name in &snip.attrs.names {
                 if !snip.attrs.not_library.contains(name) {
                     if !libs.contains_key(name) {
@@ -53,14 +59,14 @@ pub fn process_snippets(
                             Lib {
                                 path: path.clone(),
                                 name: snip.name.clone(),
-                                content: String::new(),
+                                content: content.clone(),
                             },
                         );
                     }
 
                     let l = libs.entry(name.clone()).or_default();
                     l.content += &snip.attrs.prefix;
-                    l.content += &snip.content;
+                    l.content += &content;
                 }
 
                 let s = pre.entry(name.clone()).or_default();
@@ -68,7 +74,7 @@ pub fn process_snippets(
                 if s.content.is_empty() {
                     s.content += &format!("#[cargo_snippet_more::expanded(\"{}\")]", name);
                 }
-                s.content += &snip.content;
+                s.content += &content;
 
                 for dep in &snip.attrs.uses {
                     deps.entry(name.clone())

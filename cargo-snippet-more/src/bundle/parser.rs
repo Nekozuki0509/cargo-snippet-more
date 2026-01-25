@@ -72,7 +72,7 @@ impl Visitor {
 
 impl<'ast> Visit<'ast> for Visitor {
     fn visit_item(&mut self, item: &'ast Item) {
-        match *item {
+        match item {
             Item::Use(i) => {
                 self.use_items.push(i.clone());
                 self.process_attributes(&i.attrs);
@@ -95,7 +95,7 @@ impl<'ast> Visit<'ast> for Visitor {
             _ => {}
         }
 
-        visit::visit_item(self, item);
+        syn::visit::visit_item(self, item);
     }
 }
 

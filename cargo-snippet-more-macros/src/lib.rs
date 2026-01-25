@@ -13,15 +13,3 @@ pub fn snippet(_attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn expanded(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
-
-#[macro_export]
-macro_rules! snippet_start {
-    () => {};
-    ($($tt:tt)*) => {};
-}
-
-#[macro_export]
-macro_rules! snippet_end {
-    () => {};
-    ($($tt:tt)*) => {};
-}

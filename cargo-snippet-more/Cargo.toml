@@ -1,0 +1,39 @@
+[package]
+name = "cargo-snippet-more"
+version = "0.1.0"
+authors = ["Nekozuki0509"]
+repository = "https://github.com/Nekozuki0509/cargo-snippet-more.git"
+keywords = ["subcommand", "cargo", "snippet", "competitive", "bundler"]
+license = "MIT"
+readme = "README.md"
+description = "A fork of cargo-snippet that added bundle and more snippet feature"
+categories = ["template-engine"]
+edition = "2024"
+
+[[bin]]
+name = "cargo-snippet-more"
+path = "src/main.rs"
+required-features = ["binaries"]
+
+[dependencies]
+syn = { version = "1", features = ["full", "parsing", "extra-traits", "printing", "visit"], optional = true }
+quote = { version = "1", optional = true }
+proc-macro2 = { version = "1", optional = true }
+rustfmt-nightly = { version = "1", optional = true }
+glob = { version = "0.3", optional = true }
+clap = { version = "2.29", optional = true }
+serde = { version = "1.0", optional = true}
+serde_derive = { version = "1.0", optional = true}
+serde_json = { version = "1.0", optional = true}
+log = { version= "0.4", optional = true }
+env_logger = { version= "0.7", optional = true }
+regex = { version = "1.3.5", optional = true }
+lazy_static = { version = "1.4.0", optional = true }
+toml = "0.9.6"
+anyhow = "1.0.100"
+cargo_metadata = "0.23.1"
+cargo-snippet-more-macros = { path = "../cargo-snippet-more-macros" }
+
+[features]
+binaries = ["syn", "quote", "proc-macro2", "glob", "clap", "serde", "serde_derive", "serde_json", "log", "env_logger", "regex", "lazy_static"]
+inner_rustfmt = ["rustfmt-nightly"]

@@ -3,28 +3,111 @@ use lazy_static::lazy_static;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::ToTokens;
 use regex::{Captures, Regex};
-use syn::{Attribute, File, Item, Meta, MetaList, NestedMeta, parse_file};
+use syn::visit::Visit;
+use syn::{Attribute, File, Item, Macro, Meta, MetaList, NestedMeta, parse_file};
 
 use std::collections::HashSet;
 use std::{char, u32};
 
 use crate::snippet::snippet::{Snippet, SnippetAttributes};
 
-struct Visitor {
+struct Visitor<'a> {
     source: &'a str,
-    lines: Vec<&'a str>,
+    snippets: Vec<Snippet>,
 }
 
-impl<'a> Visitor<'a> {
-    fn new(source: &'a str) -> Self {
-        Self { source, lines: source.lines().collect() }
-    }
+impl<'a> Visit<'a> for Visitor<'a> {
+    fn visit_macro(&mut self, mac: &'a Macro) {
+        let path = mac.path.to_token_stream().to_string().replace(' ', "");
 
-    fn extract_line(&self, start: usize, end: usize) -> String {
-        self.lines[start - 1..end].join("\n")
+        if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
+            && let Some(params) = parse_macro_params(mac) 
+        {
+            let re = Regex::new(dbg!(&format!(r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|.*name="{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#, params.names.iter().next().unwrap()))).unwrap();
+            let content = re.find(dbg!(self.source)).unwrap().as_str();
+            let file = syn::parse_str::<TokenStream>(content).unwrap();
+
+            self.snippets.push(Snippet {
+                name: String::new(),
+                content: stringify_tokens(file, params.doc_hidden),
+                attrs: params,
+            });
+        }
     }
 }
 
+fn parse_macro_params(mac: &Macro) -> Option<SnippetAttributes> {
+    let tokens = mac.tokens.clone().into_iter().collect::<Vec<_>>();
+
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let mut attrs = SnippetAttributes::default();
+    let mut i = 0;
+    while i < tokens.len() {
+        match &tokens[i] {
+            TokenTree::Literal(lit) => {
+                let value = lit.to_string();
+                if value.starts_with('"') {
+                    attrs.names.insert(unquote(&value));
+                }
+
+                i += 1;
+            }
+            TokenTree::Ident(ident) => {
+                let key = ident.to_string();
+
+                if i + 1 < tokens.len() 
+                    && let TokenTree::Punct(p) = &tokens[i + 1] 
+                    && p.as_char() == '=' && i + 2 < tokens.len() 
+                {
+                    if let TokenTree::Literal(lit) = &tokens[i + 2] {
+                        let value = unquote(&lit.to_string());
+                        match key.as_str() {
+                            "name" => {
+                                attrs.names.insert(value);
+                            }
+                            "include" => {
+                                for u in value.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                                    attrs.uses.insert(u.to_string());
+                                }
+                            }
+                            "prefix" => {
+                                if !attrs.prefix.is_empty() {
+                                    attrs.prefix.push('\n');
+                                }
+                                attrs.prefix.push_str(&value);
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    i += 3;
+                    continue;
+                } 
+
+                if key.as_str() == "doc_hidden" {
+                    attrs.doc_hidden = true;
+                }
+
+                i += 1;
+            }
+            TokenTree::Punct(_) => i += 1,
+            _ => i += 1
+        }
+    }
+
+    if attrs.names.is_empty() {
+        return None;
+    }
+
+    for name in &attrs.names {
+        attrs.not_library.insert(name.clone());
+    }
+
+    Some(attrs)
+}
 
 fn is_snippet_path(path: &str) -> bool {
     match path {
@@ -180,7 +263,7 @@ fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
             })
             .next(),
         // #[snippet=".."]
-        Meta::NameValue(nv) => Some(unquote(&nv.lit.clone() .into_token_stream().to_string())),
+        Meta::NameValue(nv) => Some(unquote(&nv.lit.clone().into_token_stream().to_string())),
         _ => None,
     }
 }
@@ -556,6 +639,16 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
             content: stringify_tokens(file.into_token_stream(), doc_hidden),
         })
     }
+
+    res.extend({
+        let mut visitor = Visitor {
+            source: &file.to_token_stream().to_string(),
+            snippets: vec![],
+        };
+        visitor.visit_file(&file);
+
+        visitor.snippets
+    });
 
     res.extend(
         file.items

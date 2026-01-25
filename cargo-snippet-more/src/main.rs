@@ -149,10 +149,7 @@ fn bundle(config: BundleConfig) -> Result<()> {
     let re = Regex::new("use cargo-snippet-more.*;").unwrap();
     content = re.replace_all(&content, "/* $0 */").to_string();
 
-    let re = Regex::new("#\\[cargo_snippet_more::expanded\\(\".*\"\\)\\]").unwrap();
-    content = re.replace_all(&content, "/* $0 */").to_string();
-
-    let re = Regex::new("#\\[expanded\\(\".*\"\\)\\]").unwrap();
+    let re = Regex::new("#\\[(cargo_snippet_more::)?expanded\\(\".*\"\\)\\]").unwrap();
     content = re.replace_all(&content, "/* $0 */").to_string();
 
     if !bundle_content.is_empty() {

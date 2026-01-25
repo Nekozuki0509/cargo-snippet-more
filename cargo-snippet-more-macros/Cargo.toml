@@ -1,0 +1,11 @@
+[package]
+name = "cargo-snippet-more-macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+path = "src/lib.rs"
+
+[dependencies]
+
