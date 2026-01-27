@@ -21,7 +21,7 @@ impl<'a> Visit<'a> for Visitor<'a> {
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
 
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
-            && let Some(params) = parse_macro_params(mac) 
+            && let Some((name, params)) = parse_macro_params(mac) 
         {
             let re = Regex::new(&format!(r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|.*name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#, params.names.iter().next().unwrap())).unwrap();
             let mut content = re.find(self.source).unwrap().as_str().to_string();
@@ -32,7 +32,7 @@ impl<'a> Visit<'a> for Visitor<'a> {
             let file = syn::parse_str::<TokenStream>(&content).unwrap();
 
             self.snippets.push(Snippet {
-                name: String::new(),
+                name: name,
                 content: stringify_tokens(file, params.doc_hidden),
                 attrs: params,
             });
@@ -42,7 +42,7 @@ impl<'a> Visit<'a> for Visitor<'a> {
     }
 }
 
-fn parse_macro_params(mac: &Macro) -> Option<SnippetAttributes> {
+fn parse_macro_params(mac: &Macro) -> Option<(String, SnippetAttributes)> {
     let tokens = mac.tokens.clone().into_iter().collect::<Vec<_>>();
 
     if tokens.is_empty() {
@@ -50,6 +50,7 @@ fn parse_macro_params(mac: &Macro) -> Option<SnippetAttributes> {
     }
 
     let mut attrs = SnippetAttributes::default();
+    let mut name = String::new();
     let mut i = 0;
     while i < tokens.len() {
         match &tokens[i] {
@@ -85,6 +86,9 @@ fn parse_macro_params(mac: &Macro) -> Option<SnippetAttributes> {
                                 }
                                 attrs.prefix.push_str(&value);
                             }
+                            "library" => {
+                                name = value;
+                            }
                             _ => {}
                         }
                     }
@@ -108,11 +112,13 @@ fn parse_macro_params(mac: &Macro) -> Option<SnippetAttributes> {
         return None;
     }
 
-    for name in &attrs.names {
-        attrs.not_library.insert(name.clone());
+    if name.is_empty() {
+        for name in &attrs.names {
+            attrs.not_library.insert(name.clone());
+        }
     }
 
-    Some(attrs)
+    Some((name, attrs))
 }
 
 fn is_snippet_path(path: &str) -> bool {
