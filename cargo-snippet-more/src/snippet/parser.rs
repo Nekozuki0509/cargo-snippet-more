@@ -23,11 +23,12 @@ impl<'a> Visit<'a> for Visitor<'a> {
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
             && let Some((name, params)) = parse_macro_params(mac) 
         {
-            let re = Regex::new(&format!(r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|.*name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#, params.names.iter().next().unwrap())).unwrap();
+            let re = Regex::new(dbg!(&format!(r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#, params.names.iter().next().unwrap()))).unwrap();
             let mut content = re.find(self.source).unwrap().as_str().to_string();
 
             let re = Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#).unwrap();
             content = re.replace_all(&content, "").to_string();
+            dbg!(params.names.iter().next().unwrap(), &name, &content);
 
             let file = syn::parse_str::<TokenStream>(&content).unwrap();
 
