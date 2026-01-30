@@ -7,6 +7,7 @@ use std::io::{self, Read, Write};
 
 use anyhow::{Context, Error, Result};
 use clap::{App, AppSettings, Arg, SubCommand, crate_authors, crate_version};
+use lazy_static::lazy_static;
 use log::error;
 use regex::Regex;
 use toml::Value;
@@ -18,6 +19,14 @@ use crate::bundle::meta;
 use crate::bundle::parser::get_should_bundle;
 use crate::snippet::config::SnippetConfig;
 use crate::snippet::parser::parse_snippet;
+
+lazy_static! {
+    // These regex patterns are compile-time constants and known to be valid
+    static ref CARGO_SNIPPET_MORE_RE: Regex = Regex::new("use cargo-snippet-more.*;")
+        .expect("Failed to compile cargo-snippet-more import removal regex");
+    static ref EXPANDED_MACRO_RE: Regex = Regex::new(r#"(cargo_snippet_more::)?expanded!\(".*"\)"#)
+        .expect("Failed to compile expanded macro removal regex");
+}
 use crate::snippet::snippet::process_snippets;
 
 /// Report error and continue.
@@ -148,20 +157,18 @@ fn bundle(config: BundleConfig) -> Result<()> {
     let mut content = read_to_string(metas.bin.as_str())?;
     let bundle_content = get_should_bundle(&content, &data)?;
     for (name, _) in data {
-        // Escape the module name to handle special regex characters
+        // Escape the module name to handle special regex characters, then build complete pattern
         let escaped_name = regex::escape(&name);
-        let re = Regex::new(&format!("use {}.*;", escaped_name))
+        // Match "use <module>::..." or "use <module>;" patterns
+        let pattern = format!(r"use\s+{}(?:::.*)?;", escaped_name);
+        let re = Regex::new(&pattern)
             .with_context(|| format!("Failed to create regex for module: {}", name))?;
         content = re.replace_all(&content, "/* $0 */").to_string();
     }
 
-    let re = Regex::new("use cargo-snippet-more.*;")
-        .context("Failed to create regex for cargo-snippet-more import removal")?;
-    content = re.replace_all(&content, "/* $0 */").to_string();
+    content = CARGO_SNIPPET_MORE_RE.replace_all(&content, "/* $0 */").to_string();
 
-    let re = Regex::new(r#"(cargo_snippet_more::)?expanded!\(".*"\)\"#)
-        .context("Failed to create regex for expanded macro removal")?;
-    content = re.replace_all(&content, "/* $0 */").to_string();
+    content = EXPANDED_MACRO_RE.replace_all(&content, "/* $0 */").to_string();
 
     if !bundle_content.is_empty() {
         content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n";

@@ -11,6 +11,18 @@ use std::{char, u32};
 
 use crate::snippet::snippet::{Snippet, SnippetAttributes};
 
+lazy_static! {
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref SNIPPET_ATTR_RE: Regex = Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#)
+        .expect("Failed to compile snippet attribute removal regex");
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref ESCAPED_UNICODE: Regex = Regex::new(r"\\u\{([0-9a-fA-F]{1,6})\}") 
+        .expect("Failed to compile unicode escape regex");
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref DOC_RE: Regex = Regex::new(r#"^\[doc = "(?s)(.*)"\]$"#)
+        .expect("Failed to compile doc comment regex");
+}
+
 struct Visitor<'a> {
     source: &'a str,
     snippets: Vec<Snippet>,
@@ -18,11 +30,6 @@ struct Visitor<'a> {
 
 impl<'a> Visit<'a> for Visitor<'a> {
     fn visit_macro(&mut self, mac: &'a Macro) {
-        lazy_static! {
-            // This regex pattern is a compile-time constant and known to be valid
-            static ref SNIPPET_ATTR_RE: Regex = Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#)
-                .expect("Failed to compile snippet attribute removal regex");
-        }
         
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
 
@@ -502,10 +509,6 @@ fn next_token_is_doc(token: &TokenTree) -> bool {
 }
 
 fn unescape(s: impl Into<String>) -> String {
-    lazy_static! {
-        // This regex pattern is a compile-time constant and known to be valid
-        static ref ESCAPED_UNICODE: Regex = Regex::new(r"\\u\{([0-9a-fA-F]{1,6})\}").unwrap();
-    }
     let s = s.into();
     let unicode_unescaped: Vec<char> = ESCAPED_UNICODE
         .replace_all(&s, |caps: &Captures| {
@@ -553,10 +556,6 @@ fn unescape(s: impl Into<String>) -> String {
 }
 
 fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Option<String> {
-    lazy_static! {
-        // This regex pattern is a compile-time constant and known to be valid
-        static ref DOC_RE: Regex = Regex::new(r#"^\[doc = "(?s)(.*)"\]$"#).unwrap();
-    }
     if doc_hidden {
         return None;
     }

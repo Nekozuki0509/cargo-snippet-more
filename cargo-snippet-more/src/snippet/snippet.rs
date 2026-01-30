@@ -5,6 +5,12 @@ use regex::Regex;
 
 use crate::bundle::data::Data;
 
+lazy_static! {
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref SNIPPET_MARKER_RE: Regex = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;")
+        .expect("Failed to compile snippet marker regex");
+}
+
 #[derive(Debug, Default)]
 pub struct SnippetAttributes {
     // A snippet with multiple names is allowed but using dependency is recommended.
@@ -36,12 +42,6 @@ pub struct Lib {
 pub fn process_snippets(
     snips: Vec<(Vec<String>, Vec<Snippet>)>,
 ) -> (Data, BTreeMap<String, String>) {
-    lazy_static! {
-        // This regex pattern is a compile-time constant and known to be valid
-        static ref SNIPPET_MARKER_RE: Regex = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;")
-            .expect("Failed to compile snippet marker regex");
-    }
-    
     #[derive(Default, Clone, Debug)]
     struct Snip {
         prefix: String,
