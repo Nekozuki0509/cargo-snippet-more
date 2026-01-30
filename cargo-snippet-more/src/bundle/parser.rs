@@ -58,6 +58,11 @@ impl Visitor {
 }
 
 impl<'ast> Visit<'ast> for Visitor {
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        self.use_items.push(item.clone());
+        syn::visit::visit_item_use(self, item);
+    }
+
     fn visit_macro(&mut self, mac: &'ast Macro) {
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
 
