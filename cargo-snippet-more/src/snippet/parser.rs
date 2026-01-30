@@ -32,9 +32,12 @@ impl<'a> Visit<'a> for Visitor<'a> {
 
             let file = syn::parse_str::<TokenStream>(&content).unwrap();
 
+            let content = stringify_tokens(file, params.doc_hidden);
+            let content = process_comment_placeholders(content);
+
             self.snippets.push(Snippet {
                 name: name,
-                content: stringify_tokens(file, params.doc_hidden),
+                content,
                 attrs: params,
             });
         }
@@ -537,11 +540,126 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
         })
 }
 
+// Helper function to check if a token tree is a placeholder macro (p!)
+fn is_placeholder_macro(ident: &TokenTree, punct: Option<&TokenTree>) -> bool {
+    if let TokenTree::Ident(id) = ident {
+        if id.to_string() == "p" {
+            if let Some(TokenTree::Punct(p)) = punct {
+                return p.as_char() == '!';
+            }
+        }
+    }
+    false
+}
+
+// Parse and convert p! macro to placeholder syntax
+fn parse_placeholder_macro(tokens: TokenStream) -> Option<String> {
+    let tokens: Vec<TokenTree> = tokens.into_iter().collect();
+    
+    if tokens.is_empty() {
+        return None;
+    }
+    
+    // First token should be a literal (the number)
+    if let TokenTree::Literal(lit) = &tokens[0] {
+        let num_str = lit.to_string();
+        
+        // p!(0) → $0
+        if num_str == "0" && tokens.len() == 1 {
+            return Some("$0".to_string());
+        }
+        
+        // p!(n) → ${n}
+        if tokens.len() == 1 {
+            return Some(format!("${{{}}}", num_str));
+        }
+        
+        // Check for comma after number
+        if tokens.len() > 1 {
+            if let TokenTree::Punct(p) = &tokens[1] {
+                if p.as_char() == ',' && tokens.len() > 2 {
+                    // Check if it's a choice syntax: |a, b, c|
+                    if let TokenTree::Punct(p) = &tokens[2] {
+                        if p.as_char() == '|' {
+                            // Parse choices
+                            let mut choices = Vec::new();
+                            let mut i = 3;
+                            
+                            while i < tokens.len() {
+                                match &tokens[i] {
+                                    TokenTree::Punct(p) if p.as_char() == '|' => {
+                                        // End of choices
+                                        break;
+                                    }
+                                    TokenTree::Punct(p) if p.as_char() == ',' => {
+                                        // Skip comma separators
+                                        i += 1;
+                                        continue;
+                                    }
+                                    TokenTree::Ident(id) => {
+                                        choices.push(id.to_string());
+                                    }
+                                    TokenTree::Literal(lit) => {
+                                        choices.push(lit.to_string());
+                                    }
+                                    _ => {}
+                                }
+                                i += 1;
+                            }
+                            
+                            if !choices.is_empty() {
+                                return Some(format!("${{{}|{}|}}", num_str, choices.join(",")));
+                            }
+                        }
+                    }
+                    
+                    // Otherwise, it's p!(n, content) → ${n:content}
+                    // Collect remaining tokens as the default value
+                    let content_tokens: Vec<String> = tokens[2..]
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect();
+                    let content = content_tokens.join(" ");
+                    return Some(format!("${{{}:{}}}", num_str, content.trim()));
+                }
+            }
+        }
+    }
+    
+    None
+}
+
 fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
     let mut res = String::new();
     let mut iter = tokens.into_iter().peekable();
     while let Some(tok) = iter.next() {
         match tok {
+            TokenTree::Ident(ref ident) => {
+                // Check if this is a placeholder macro
+                let peek = iter.peek();
+                if is_placeholder_macro(&tok, peek) {
+                    // Skip the '!' 
+                    iter.next();
+                    
+                    // Next should be a group with parentheses
+                    if let Some(TokenTree::Group(g)) = iter.next() {
+                        if g.delimiter() == Delimiter::Parenthesis {
+                            if let Some(placeholder) = parse_placeholder_macro(g.stream()) {
+                                res.push_str(&placeholder);
+                                res.push(' ');
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    // If we couldn't parse it as a placeholder, output as-is
+                    res.push_str(ident.to_string().as_str());
+                    res.push(' ');
+                } else {
+                    res.push_str(tok.to_string().as_str());
+                    res.push(' ');
+                }
+            }
             TokenTree::Punct(ref punct) => {
                 if punct.as_char() == '!' && iter.peek().map(next_token_is_doc).unwrap_or(false) {
                     // inner doc comment here.
@@ -596,6 +714,77 @@ fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
     res
 }
 
+// Process comment-based placeholders in the output string
+fn process_comment_placeholders(mut content: String) -> String {
+    lazy_static! {
+        // Match /*ps!(n)*/ or /*ps!(n, |a, b|)*/
+        static ref PS_RE: Regex = Regex::new(r"/\*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)\*/").unwrap();
+        // Match /*pe!(n)*/
+        static ref PE_RE: Regex = Regex::new(r"/\*pe!\((\d+)\)\*/").unwrap();
+        // Match /*p!(n)*/
+        static ref P_RE: Regex = Regex::new(r"/\*p!\((\d+)\)\*/").unwrap();
+    }
+    
+    // Process paired ps!/pe! markers
+    // Build a list of all ps! and pe! markers with their positions
+    let mut ps_markers: Vec<(usize, usize, String, Option<String>)> = Vec::new();
+    for cap in PS_RE.captures_iter(&content) {
+        if let Some(m) = cap.get(0) {
+            let num = cap.get(1).unwrap().as_str().to_string();
+            let choices = cap.get(2).map(|c| c.as_str().to_string());
+            ps_markers.push((m.start(), m.end(), num, choices));
+        }
+    }
+    
+    let mut pe_markers: Vec<(usize, usize, String)> = Vec::new();
+    for cap in PE_RE.captures_iter(&content) {
+        if let Some(m) = cap.get(0) {
+            let num = cap.get(1).unwrap().as_str().to_string();
+            pe_markers.push((m.start(), m.end(), num));
+        }
+    }
+    
+    // Match ps! and pe! pairs with the same number
+    let mut replacements: Vec<(usize, usize, String)> = Vec::new();
+    
+    for (ps_start, ps_end, ps_num, choices) in ps_markers.iter() {
+        // Find matching pe! marker
+        if let Some((pe_start, pe_end, _)) = pe_markers.iter().find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
+            // Extract content between markers
+            let inner_content = content[*ps_end..*pe_start].to_string();
+            
+            let placeholder = if let Some(choice_str) = choices {
+                // Choices: ${n|a,b,c|}
+                let choices_formatted = choice_str.split(',').map(|s| s.trim()).collect::<Vec<_>>().join(",");
+                format!("${{{}|{}|}}", ps_num, choices_formatted)
+            } else {
+                // Default: ${n:content}
+                format!("${{{}:{}}}", ps_num, inner_content.trim())
+            };
+            
+            replacements.push((*ps_start, *pe_end, placeholder));
+        }
+    }
+    
+    // Apply replacements in reverse order to maintain positions
+    replacements.sort_by(|a, b| b.0.cmp(&a.0));
+    for (start, end, replacement) in replacements {
+        content.replace_range(start..end, &replacement);
+    }
+    
+    // Process standalone p! markers
+    content = P_RE.replace_all(&content, |caps: &Captures| {
+        let num = caps.get(1).unwrap().as_str();
+        if num == "0" {
+            "$0".to_string()
+        } else {
+            format!("${{{}}}", num)
+        }
+    }).to_string();
+    
+    content
+}
+
 // Get snippet names and snippet code (not formatted)
 fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     let default_name = get_default_snippet_name(&item);
@@ -605,10 +794,12 @@ fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     snip_attrs.map(|attrs| {
         remove_snippet_attr(&mut item);
         let doc_hidden = attrs.doc_hidden;
+        let content = stringify_tokens(item.into_token_stream(), doc_hidden);
+        let content = process_comment_placeholders(content);
         Snippet {
             name: default_name.unwrap_or_default(),
             attrs,
-            content: stringify_tokens(item.into_token_stream(), doc_hidden),
+            content,
         }
     })
 }
@@ -646,10 +837,12 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
             remove_snippet_attr(item);
         });
         let doc_hidden = attrs.doc_hidden;
+        let content = stringify_tokens(file.into_token_stream(), doc_hidden);
+        let content = process_comment_placeholders(content);
         res.push(Snippet {
             name: String::new(),
             attrs,
-            content: stringify_tokens(file.into_token_stream(), doc_hidden),
+            content,
         })
     }
 

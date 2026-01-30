@@ -77,6 +77,36 @@ pub fn format_src(src: &str) -> Option<String> {
     Some(lines.collect::<Vec<_>>().join("\n"))
 }
 
+// Escape $ characters that are NOT part of placeholder syntax
+fn escape_non_placeholder_dollars(line: &str) -> String {
+    use regex::Regex;
+    lazy_static::lazy_static! {
+        // Match placeholder patterns: $0, ${n}, ${n:...}, ${n|...|} 
+        static ref PLACEHOLDER_RE: Regex = Regex::new(r"\$(?:0|\{\d+(?::[^}]*|\|[^}]*\|)?\})").unwrap();
+    }
+    
+    let mut result = String::new();
+    let mut last_end = 0;
+    
+    // Find all placeholders
+    for mat in PLACEHOLDER_RE.find_iter(line) {
+        // Escape dollars in the text before this placeholder
+        let before = &line[last_end..mat.start()];
+        result.push_str(&before.replace("$", "\\$"));
+        
+        // Add the placeholder as-is (don't escape)
+        result.push_str(mat.as_str());
+        
+        last_end = mat.end();
+    }
+    
+    // Escape dollars in the remaining text
+    let after = &line[last_end..];
+    result.push_str(&after.replace("$", "\\$"));
+    
+    result
+}
+
 pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {
     for (name, content) in snippets.iter() {
         if let Some(formatted) = format_src(content) {
@@ -100,9 +130,7 @@ pub fn write_vscode(snippets: &BTreeMap<String, String>) {
                         prefix: name.to_owned(),
                         body: formatted
                             .lines()
-                            .map(|l|
-                                // Escape "$" to disable placeholder
-                                l.to_owned().replace("$", "\\$"))
+                            .map(|l| escape_non_placeholder_dollars(l))
                             .collect(),
                     },
                 )
