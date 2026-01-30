@@ -1,5 +1,50 @@
 use serde_derive::Serialize;
 use std::collections::BTreeMap;
+use regex::Regex;
+use lazy_static::lazy_static;
+
+/// Extract placeholders from source, replace with markers, return both
+fn extract_placeholders_for_formatting(src: &str) -> (String, Vec<(String, String)>) {
+    lazy_static! {
+        // Match all placeholder patterns: $0, ${n}, ${n:...}, ${n|...|} 
+        static ref PLACEHOLDER_RE: Regex = Regex::new(r"\$(?:0|\{\d+(?::[^}]*|\|[^}]*\|)?\})").unwrap();
+    }
+    
+    let mut placeholder_map = Vec::new();
+    let mut result = src.to_string();
+    let mut counter = 0;
+    
+    // Replace each placeholder with a unique marker
+    for mat in PLACEHOLDER_RE.find_iter(src) {
+        let placeholder = mat.as_str();
+        let marker = format!("__PLACEHOLDER_{}__", counter);
+        placeholder_map.push((marker.clone(), placeholder.to_string()));
+        counter += 1;
+    }
+    
+    // Apply replacements in reverse order to preserve positions
+    for (marker, placeholder) in placeholder_map.iter().rev() {
+        result = result.replace(placeholder, marker);
+    }
+    
+    // Reverse the map so we can restore in forward order
+    placeholder_map.reverse();
+    
+    (result, placeholder_map)
+}
+
+/// Restore placeholders after formatting
+fn restore_placeholders_after_formatting(formatted: &str, placeholder_map: &[(String, String)]) -> String {
+    let mut result = formatted.to_string();
+    
+    // Replace markers back with placeholders
+    for (marker, placeholder) in placeholder_map {
+        result = result.replace(marker, placeholder);
+    }
+    
+    result
+}
+
 
 #[derive(Serialize)]
 struct VScode {
@@ -9,12 +54,10 @@ struct VScode {
 
 #[cfg(feature = "inner_rustfmt")]
 pub fn format_src(src: &str) -> Option<String> {
-    // If content contains placeholders, skip rustfmt as it will fail
-    if src.contains("${") || src.contains("$0") {
-        return Some(src.to_string());
-    }
+    // Extract placeholders before formatting, format, then restore them
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
     
-    let src = format!("fn ___dummy___() {{{}}}", src);
+    let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
     let mut rustfmt_config = rustfmt_nightly::Config::default();
     rustfmt_config
         .set()
@@ -38,7 +81,8 @@ pub fn format_src(src: &str) -> Option<String> {
 
             lines.next();
             lines.next_back();
-            lines.collect::<Vec<_>>().join("\n")
+            let formatted = lines.collect::<Vec<_>>().join("\n");
+            restore_placeholders_after_formatting(&formatted, &placeholder_map)
         })
     } else {
         None
@@ -47,12 +91,10 @@ pub fn format_src(src: &str) -> Option<String> {
 
 #[cfg(not(feature = "inner_rustfmt"))]
 pub fn format_src(src: &str) -> Option<String> {
-    // If content contains placeholders, skip rustfmt as it will fail
-    if src.contains("${") || src.contains("$0") {
-        return Some(src.to_string());
-    }
+    // Extract placeholders before formatting, format, then restore them
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
     
-    let src = format!("fn ___dummy___() {{{}}}", src);
+    let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
 
     use std::io::Write;
     use std::process;
@@ -84,7 +126,8 @@ pub fn format_src(src: &str) -> Option<String> {
     lines.next();
     lines.next_back();
 
-    Some(lines.collect::<Vec<_>>().join("\n"))
+    let formatted = lines.collect::<Vec<_>>().join("\n");
+    Some(restore_placeholders_after_formatting(&formatted, &placeholder_map))
 }
 
 // Escape $ characters that are NOT part of placeholder syntax
