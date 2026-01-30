@@ -85,7 +85,8 @@ impl Data {
 
     pub fn write(&self) -> Result<(), Error> {
         let mut file = File::create("libraries.toml")?;
-        let toml = toml::to_string(self).unwrap();
+        let toml = toml::to_string(self)
+            .context("Failed to serialize data to TOML format")?;
         write!(file, "{}", toml)?;
         file.flush()?;
 
@@ -93,7 +94,9 @@ impl Data {
     }
 
     pub fn read(path: &str) -> Result<Self, Error> {
-        let file = fs::read_to_string(path)?;
-        toml::from_str::<Self>(&file).context("")
+        let file = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {}", path))?;
+        toml::from_str::<Self>(&file)
+            .with_context(|| format!("Failed to parse TOML from file: {}", path))
     }
 }

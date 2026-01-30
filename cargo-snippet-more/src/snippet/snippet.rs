@@ -48,7 +48,14 @@ pub fn process_snippets(
     for (path, snip_vec) in snips {
         for snip in snip_vec {
             let mut content = snip.content;
-            let re = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;").unwrap();
+            // This regex is a fixed pattern, so it should always compile successfully
+            let re = match Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;") {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("Failed to create regex for snippet marker removal: {}", e);
+                    continue;
+                }
+            };
             content = re.replace_all(&content, "").to_string();
 
             for name in &snip.attrs.names {

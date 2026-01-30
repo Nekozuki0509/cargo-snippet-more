@@ -23,14 +23,51 @@ impl<'a> Visit<'a> for Visitor<'a> {
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
             && let Some((name, params)) = parse_macro_params(mac) 
         {
-            let re = Regex::new(dbg!(&format!(r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#, params.names.iter().next().unwrap()))).unwrap();
-            let mut content = re.find(self.source).unwrap().as_str().to_string();
+            let snippet_name = match params.names.iter().next() {
+                Some(name) => name,
+                None => {
+                    log::error!("Snippet parameters have no names");
+                    return;
+                }
+            };
+            
+            let pattern = format!(
+                r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#,
+                snippet_name
+            );
+            
+            let re = match Regex::new(&pattern) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("Failed to create regex for snippet '{}': {}", snippet_name, e);
+                    return;
+                }
+            };
+            
+            let mut content = match re.find(self.source) {
+                Some(m) => m.as_str().to_string(),
+                None => {
+                    log::error!("Could not find snippet '{}' in source", snippet_name);
+                    return;
+                }
+            };
 
-            let re = Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#).unwrap();
+            let re = match Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("Failed to create regex for snippet attribute removal: {}", e);
+                    return;
+                }
+            };
             content = re.replace_all(&content, "").to_string();
-            dbg!(params.names.iter().next().unwrap(), &name, &content);
 
-            let file = syn::parse_str::<TokenStream>(&content).unwrap();
+            let file = match syn::parse_str::<TokenStream>(&content) {
+                Ok(f) => f,
+                Err(e) => {
+                    log::error!("Failed to parse snippet '{}' as TokenStream: {}", snippet_name, e);
+                    return;
+                }
+            };
 
             self.snippets.push(Snippet {
                 name: name,
@@ -337,7 +374,8 @@ fn get_simple_attr(attr: &Attribute, key: &str) -> Vec<String> {
                                 let value = if let syn::Lit::Str(s) = &nv.lit.clone() {
                                     s.value()
                                 } else {
-                                    panic!("attribute must be string");
+                                    log::error!("Snippet attribute '{}' must be a string literal", key);
+                                    return None;
                                 };
                                 Some(value)
                             } else {
@@ -464,6 +502,7 @@ fn next_token_is_doc(token: &TokenTree) -> bool {
 
 fn unescape(s: impl Into<String>) -> String {
     lazy_static! {
+        // This regex pattern is a compile-time constant and known to be valid
         static ref ESCAPED_UNICODE: Regex = Regex::new(r"\\u\{([0-9a-fA-F]{1,6})\}").unwrap();
     }
     let s = s.into();
@@ -514,6 +553,7 @@ fn unescape(s: impl Into<String>) -> String {
 
 fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Option<String> {
     lazy_static! {
+        // This regex pattern is a compile-time constant and known to be valid
         static ref DOC_RE: Regex = Regex::new(r#"^\[doc = "(?s)(.*)"\]$"#).unwrap();
     }
     if doc_hidden {
@@ -673,5 +713,7 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
 }
 
 pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
-    parse_file(src).map(get_snippet_from_file).context("")
+    parse_file(src)
+        .map(get_snippet_from_file)
+        .context("Failed to parse Rust source file")
 }

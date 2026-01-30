@@ -115,8 +115,14 @@ fn snippet(config: SnippetConfig) {
         buf.clear();
         log::info!("Start read {:?}", &path);
         if let Some(use_path) = report_error(result)
-            && let Some(mut file) = report_error(fs::File::open(path).context(""))
-            && report_error(file.read_to_string(&mut buf).context("")).is_some()
+            && let Some(mut file) = report_error(
+                fs::File::open(&path)
+                    .with_context(|| format!("Failed to open file: {}", path.display()))
+            )
+            && report_error(
+                file.read_to_string(&mut buf)
+                    .with_context(|| format!("Failed to read file: {}", path.display()))
+            ).is_some()
             && let Some(parsed) = report_error(parse_snippet(&buf))
         {
             snippets.push((use_path, parsed));
@@ -142,14 +148,17 @@ fn bundle(config: BundleConfig) -> Result<()> {
     let mut content = read_to_string(metas.bin.as_str())?;
     let bundle_content = get_should_bundle(&content, &data)?;
     for (name, _) in data {
-        let re = Regex::new(&format!("use {}.*;", &name)).unwrap();
+        let re = Regex::new(&format!("use {}.*;", &name))
+            .with_context(|| format!("Failed to create regex for module: {}", name))?;
         content = re.replace_all(&content, "/* $0 */").to_string();
     }
 
-    let re = Regex::new("use cargo-snippet-more.*;").unwrap();
+    let re = Regex::new("use cargo-snippet-more.*;")
+        .context("Failed to create regex for cargo-snippet-more import removal")?;
     content = re.replace_all(&content, "/* $0 */").to_string();
 
-    let re = Regex::new(r#"(cargo_snippet_more::)?expanded!\(".*"\)\"#).unwrap();
+    let re = Regex::new(r#"(cargo_snippet_more::)?expanded!\(".*"\)\"#)
+        .context("Failed to create regex for expanded macro removal")?;
     content = re.replace_all(&content, "/* $0 */").to_string();
 
     if !bundle_content.is_empty() {
@@ -177,7 +186,7 @@ fn init() -> Result<()> {
             .and_then(|x| x.get_mut("cargo-compete"))
             .and_then(|x| x.get_mut("bin"))
             .and_then(|x| x.as_table_mut())
-            .context("")?;
+            .context("Failed to find package.metadata.cargo-compete.bin table in Cargo.toml")?;
 
         newbins = bintable
             .iter()
@@ -198,7 +207,11 @@ fn init() -> Result<()> {
     }
 
     {
-        let bins = doc.get_mut("bin").context("")?.as_array_mut().context("")?;
+        let bins = doc
+            .get_mut("bin")
+            .context("Failed to find bin section in Cargo.toml")?
+            .as_array_mut()
+            .context("bin section in Cargo.toml is not an array")?;
         for (name, _, _) in newbins {
             let mut entry = Map::new();
             entry.insert("name".to_string(), Value::String(format!("{}-more", name)));
@@ -211,7 +224,10 @@ fn init() -> Result<()> {
         }
     }
 
-    write("Cargo.toml", toml::to_string(&doc).context("")?)?;
+    write(
+        "Cargo.toml",
+        toml::to_string(&doc).context("Failed to serialize Cargo.toml to TOML format")?,
+    )?;
 
     Ok(())
 }
