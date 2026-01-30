@@ -9,6 +9,11 @@ struct VScode {
 
 #[cfg(feature = "inner_rustfmt")]
 pub fn format_src(src: &str) -> Option<String> {
+    // If content contains placeholders, skip rustfmt as it will fail
+    if src.contains("${") || src.contains("$0") {
+        return Some(src.to_string());
+    }
+    
     let src = format!("fn ___dummy___() {{{}}}", src);
     let mut rustfmt_config = rustfmt_nightly::Config::default();
     rustfmt_config
@@ -42,6 +47,11 @@ pub fn format_src(src: &str) -> Option<String> {
 
 #[cfg(not(feature = "inner_rustfmt"))]
 pub fn format_src(src: &str) -> Option<String> {
+    // If content contains placeholders, skip rustfmt as it will fail
+    if src.contains("${") || src.contains("$0") {
+        return Some(src.to_string());
+    }
+    
     let src = format!("fn ___dummy___() {{{}}}", src);
 
     use std::io::Write;

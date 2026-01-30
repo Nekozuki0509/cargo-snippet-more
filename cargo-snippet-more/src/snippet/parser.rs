@@ -23,17 +23,21 @@ impl<'a> Visit<'a> for Visitor<'a> {
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
             && let Some((name, params)) = parse_macro_params(mac) 
         {
-            let re = Regex::new(dbg!(&format!(r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#, params.names.iter().next().unwrap()))).unwrap();
+            let re = Regex::new(&format!(r#"(?s)(cargo_snippet_more\s*::\s*)?snippet_start\s*!\s*\(("{0}"|name\s*=\s*"{0}".*)\)\s*;.+(cargo_snippet_more\s*::\s*)?snippet_end\s*!\s*\("{0}"\)\s*;"#, params.names.iter().next().unwrap())).unwrap();
             let mut content = re.find(self.source).unwrap().as_str().to_string();
 
-            let re = Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#).unwrap();
+            let re = Regex::new(r#"#\s*\[(cargo_snippet_more\s*::\s*)?snippet.+?\]"#).unwrap();
             content = re.replace_all(&content, "").to_string();
-            dbg!(params.names.iter().next().unwrap(), &name, &content);
+
+            // Extract comment placeholder mappings before parsing
+            let comment_mappings = extract_comment_placeholders(&content);
 
             let file = syn::parse_str::<TokenStream>(&content).unwrap();
 
-            let content = stringify_tokens(file, params.doc_hidden);
-            let content = process_comment_placeholders(content);
+            let mut content = stringify_tokens(file, params.doc_hidden);
+            
+            // Apply comment placeholder replacements after stringification
+            content = apply_comment_placeholders(content, &comment_mappings);
 
             self.snippets.push(Snippet {
                 name: name,
@@ -785,6 +789,88 @@ fn process_comment_placeholders(mut content: String) -> String {
     content
 }
 
+// Extract comment placeholder mapping from source without modifying it
+fn extract_comment_placeholders(content: &str) -> Vec<(String, String)> {
+    lazy_static! {
+        static ref PS_RE: Regex = Regex::new(r"/\*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)\*/").unwrap();
+        static ref PE_RE: Regex = Regex::new(r"/\*pe!\((\d+)\)\*/").unwrap();
+        static ref P_RE: Regex = Regex::new(r"/\*p!\((\d+)\)\*/").unwrap();
+    }
+    
+    let mut mappings = Vec::new();
+    
+    // Find ps! markers
+    let ps_markers: Vec<(usize, usize, String, Option<String>)> = PS_RE.captures_iter(content)
+        .filter_map(|cap| {
+            cap.get(0).map(|m| {
+                let num = cap.get(1).unwrap().as_str().to_string();
+                let choices = cap.get(2).map(|c| c.as_str().to_string());
+                (m.start(), m.end(), num, choices)
+            })
+        })
+        .collect();
+    
+    // Find pe! markers
+    let pe_markers: Vec<(usize, usize, String)> = PE_RE.captures_iter(content)
+        .filter_map(|cap| {
+            cap.get(0).map(|m| {
+                let num = cap.get(1).unwrap().as_str().to_string();
+                (m.start(), m.end(), num)
+            })
+        })
+        .collect();
+    
+    // Match ps!/pe! pairs
+    for (ps_start, ps_end, ps_num, choices) in ps_markers.iter() {
+        if let Some((pe_start, pe_end, _)) = pe_markers.iter().find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
+            let full_match = &content[*ps_start..*pe_end];
+            let inner = &content[*ps_end..*pe_start];
+            
+            let placeholder = if let Some(choice_str) = choices {
+                let choices_formatted = choice_str.split(',').map(|s| s.trim()).collect::<Vec<_>>().join(",");
+                format!("${{{}|{}|}}", ps_num, choices_formatted)
+            } else {
+                format!("${{{}:{}}}", ps_num, inner.trim())
+            };
+            
+            mappings.push((full_match.to_string(), placeholder));
+        }
+    }
+    
+    // Find standalone p! markers
+    for cap in P_RE.captures_iter(content) {
+        let num = cap.get(1).unwrap().as_str();
+        let full_match = cap.get(0).unwrap().as_str();
+        
+        let placeholder = if num == "0" {
+            "$0".to_string()
+        } else {
+            format!("${{{}}}", num)
+        };
+        
+        mappings.push((full_match.to_string(), placeholder));
+    }
+    
+    mappings
+}
+
+// Apply comment placeholder replacements to stringified content
+fn apply_comment_placeholders(mut content: String, mappings: &[(String, String)]) -> String {
+    for (pattern, replacement) in mappings {
+        // Remove the inner content from the pattern for matching in stringified output
+        // The stringified output won't have comments, so we need to match the remaining parts
+        let pattern_without_comments = pattern
+            .replace("/\\*ps!\\(\\d+(?:,\\s*\\|[^|]*\\|)?\\)\\*/", "")
+            .replace("/\\*pe!\\(\\d+\\)\\*/", "")
+            .replace("/\\*p!\\(\\d+\\)\\*/", "");
+        
+        if !pattern_without_comments.is_empty() {
+            content = content.replace(&pattern_without_comments, replacement);
+        }
+    }
+    content
+}
+
 // Get snippet names and snippet code (not formatted)
 fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     let default_name = get_default_snippet_name(&item);
@@ -795,7 +881,6 @@ fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
         remove_snippet_attr(&mut item);
         let doc_hidden = attrs.doc_hidden;
         let content = stringify_tokens(item.into_token_stream(), doc_hidden);
-        let content = process_comment_placeholders(content);
         Snippet {
             name: default_name.unwrap_or_default(),
             attrs,
@@ -823,7 +908,7 @@ fn get_snippet_from_item_recursive(item: Item) -> Vec<Snippet> {
     res
 }
 
-fn get_snippet_from_file(file: File) -> Vec<Snippet> {
+fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
     let mut res = Vec::new();
     // whole code is snippet
     if let Some(attrs) = parse_attrs(&file.attrs, None) {
@@ -838,7 +923,6 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
         });
         let doc_hidden = attrs.doc_hidden;
         let content = stringify_tokens(file.into_token_stream(), doc_hidden);
-        let content = process_comment_placeholders(content);
         res.push(Snippet {
             name: String::new(),
             attrs,
@@ -848,7 +932,7 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
 
     res.extend({
         let mut visitor = Visitor {
-            source: &file.to_token_stream().to_string(),
+            source,  // Use original source with comments
             snippets: vec![],
         };
         visitor.visit_file(&file);
@@ -866,5 +950,5 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
 }
 
 pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
-    parse_file(src).map(get_snippet_from_file).context("")
+    parse_file(src).map(|file| get_snippet_from_file(file, src)).context("")
 }
