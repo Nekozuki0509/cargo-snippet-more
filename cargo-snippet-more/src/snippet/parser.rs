@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::ToTokens;
 use regex::{Captures, Regex};
-use syn::visit::{Visit, visit_item_mut};
+use syn::visit::Visit;
 use syn::visit_mut::VisitMut;
 use syn::{Attribute, File, Item, Macro, Meta, MetaList, NestedMeta, parse_file};
 
