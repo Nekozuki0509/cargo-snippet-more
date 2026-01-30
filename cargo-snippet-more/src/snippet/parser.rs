@@ -18,6 +18,12 @@ struct Visitor<'a> {
 
 impl<'a> Visit<'a> for Visitor<'a> {
     fn visit_macro(&mut self, mac: &'a Macro) {
+        lazy_static! {
+            // This regex pattern is a compile-time constant and known to be valid
+            static ref SNIPPET_ATTR_RE: Regex = Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#)
+                .expect("Failed to compile snippet attribute removal regex");
+        }
+        
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
 
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
@@ -31,9 +37,11 @@ impl<'a> Visit<'a> for Visitor<'a> {
                 }
             };
             
+            // Escape the snippet name to handle special regex characters
+            let escaped_name = regex::escape(snippet_name);
             let pattern = format!(
                 r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#,
-                snippet_name
+                escaped_name
             );
             
             let re = match Regex::new(&pattern) {
@@ -52,14 +60,7 @@ impl<'a> Visit<'a> for Visitor<'a> {
                 }
             };
 
-            let re = match Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#) {
-                Ok(r) => r,
-                Err(e) => {
-                    log::error!("Failed to create regex for snippet attribute removal: {}", e);
-                    return;
-                }
-            };
-            content = re.replace_all(&content, "").to_string();
+            content = SNIPPET_ATTR_RE.replace_all(&content, "").to_string();
 
             let file = match syn::parse_str::<TokenStream>(&content) {
                 Ok(f) => f,

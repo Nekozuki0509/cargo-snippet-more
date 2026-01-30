@@ -148,7 +148,9 @@ fn bundle(config: BundleConfig) -> Result<()> {
     let mut content = read_to_string(metas.bin.as_str())?;
     let bundle_content = get_should_bundle(&content, &data)?;
     for (name, _) in data {
-        let re = Regex::new(&format!("use {}.*;", &name))
+        // Escape the module name to handle special regex characters
+        let escaped_name = regex::escape(&name);
+        let re = Regex::new(&format!("use {}.*;", escaped_name))
             .with_context(|| format!("Failed to create regex for module: {}", name))?;
         content = re.replace_all(&content, "/* $0 */").to_string();
     }

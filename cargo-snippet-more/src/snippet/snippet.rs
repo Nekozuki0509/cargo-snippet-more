@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::bundle::data::Data;
@@ -35,6 +36,12 @@ pub struct Lib {
 pub fn process_snippets(
     snips: Vec<(Vec<String>, Vec<Snippet>)>,
 ) -> (Data, BTreeMap<String, String>) {
+    lazy_static! {
+        // This regex pattern is a compile-time constant and known to be valid
+        static ref SNIPPET_MARKER_RE: Regex = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;")
+            .expect("Failed to compile snippet marker regex");
+    }
+    
     #[derive(Default, Clone, Debug)]
     struct Snip {
         prefix: String,
@@ -48,15 +55,7 @@ pub fn process_snippets(
     for (path, snip_vec) in snips {
         for snip in snip_vec {
             let mut content = snip.content;
-            // This regex is a fixed pattern, so it should always compile successfully
-            let re = match Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;") {
-                Ok(r) => r,
-                Err(e) => {
-                    log::error!("Failed to create regex for snippet marker removal: {}", e);
-                    continue;
-                }
-            };
-            content = re.replace_all(&content, "").to_string();
+            content = SNIPPET_MARKER_RE.replace_all(&content, "").to_string();
 
             for name in &snip.attrs.names {
                 if !snip.attrs.not_library.contains(name) {
