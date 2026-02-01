@@ -590,12 +590,6 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
 
     let doc = unescape(doc_tt.to_string());
     
-    // Check if this is a placeholder doc comment (contains ps!, pe!, or p!)
-    // If so, keep it as-is for later conversion in writer
-    if doc.contains("ps!(") || doc.contains("pe!(") || doc.contains("p!(") {
-        return Some(doc);
-    }
-    
     DOC_RE
         .captures(doc.as_str())
         .and_then(|caps| caps.get(1))

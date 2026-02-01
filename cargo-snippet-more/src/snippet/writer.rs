@@ -4,16 +4,10 @@ use regex::Regex;
 use lazy_static::lazy_static;
 
 /// Convert doc comment placeholders to placeholder syntax
-/// Supports: #[doc = "ps!(n)"], #[doc = "pe!(n)"], #[doc = "p!(n)"]
-/// Also supports: /// ps!(n), /// pe!(n), /// p!(n), //! ps!(n), etc.
+/// Supports: /// ps!(n), /// pe!(n), /// p!(n), //! ps!(n), etc.
 fn convert_doc_comment_placeholders(src: &str) -> String {
     lazy_static! {
-        // Match doc attribute placeholder patterns: #[doc = "ps!(...)"]
-        static ref DOC_ATTR_PS_RE: Regex = Regex::new(r#"\s*#\s*\[\s*doc\s*=\s*"ps!\((\d+)(?:,\s*\|([^|"]*)\|)?\)"\s*\]"#).unwrap();
-        static ref DOC_ATTR_PE_RE: Regex = Regex::new(r#"\s*#\s*\[\s*doc\s*=\s*"pe!\((\d+)\)"\s*\]"#).unwrap();
-        static ref DOC_ATTR_P_RE: Regex = Regex::new(r#"\s*#\s*\[\s*doc\s*=\s*"p!\((\d+)\)"\s*\]"#).unwrap();
-        
-        // Match line doc comment placeholder patterns: /// ps!(n) or //! ps!(n)
+        // Match line doc comment placeholder patterns
         static ref DOC_PS_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)[ \t]*$").unwrap();
         static ref DOC_PE_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*pe!\((\d+)\)[ \t]*$").unwrap();
         static ref DOC_P_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*p!\((\d+)\)[ \t]*$").unwrap();
@@ -21,30 +15,32 @@ fn convert_doc_comment_placeholders(src: &str) -> String {
     
     let mut result = src.to_string();
     
-    // First, handle #[doc = "..."] format ps!/pe! pairs
-    let ps_attr_matches: Vec<_> = DOC_ATTR_PS_RE.captures_iter(src).map(|cap| {
-        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(), 
-         cap.get(1).unwrap().as_str().to_string(),
-         cap.get(2).map(|c| c.as_str().to_string()))
+    // Find all ps! and pe! markers
+    let ps_markers: Vec<_> = DOC_PS_RE.captures_iter(src).map(|cap| {
+        let m = cap.get(0).unwrap();
+        let num = cap.get(2).unwrap().as_str().to_string();
+        let choices = cap.get(3).map(|c| c.as_str().to_string());
+        (m.start(), m.end(), num, choices)
     }).collect();
     
-    let pe_attr_matches: Vec<_> = DOC_ATTR_PE_RE.captures_iter(src).map(|cap| {
-        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
-         cap.get(1).unwrap().as_str().to_string())
+    let pe_markers: Vec<_> = DOC_PE_RE.captures_iter(src).map(|cap| {
+        let m = cap.get(0).unwrap();
+        let num = cap.get(2).unwrap().as_str().to_string();
+        (m.start(), m.end(), num)
     }).collect();
     
-    // Match ps!/pe! pairs and collect replacements
+    // Match ps!/pe! pairs and collect replacements using regex for content extraction
     let mut replacements = Vec::new();
     
-    for (ps_start, ps_end, ps_num, choices) in ps_attr_matches.iter() {
+    for (ps_start, ps_end, ps_num, choices) in ps_markers.iter() {
         // Find matching pe! marker
-        if let Some((pe_start, pe_end, _)) = pe_attr_matches.iter()
+        if let Some((pe_start, pe_end, _)) = pe_markers.iter()
             .find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
             
-            // Extract content between markers
-            let inner = &src[*ps_end..*pe_start];
+            // Use regex to extract content between the markers (avoiding slicing)
+            let between_pattern = regex::escape(&src[*ps_end..*pe_start]);
+            let inner_content = &src[*ps_end..*pe_start];
             
-            // Create placeholder
             let placeholder = if let Some(choice_str) = choices {
                 let choices_formatted = choice_str
                     .split(',')
@@ -53,10 +49,9 @@ fn convert_doc_comment_placeholders(src: &str) -> String {
                     .join(",");
                 format!("${{{}|{}|}}", ps_num, choices_formatted)
             } else {
-                format!("${{{}:{}}}", ps_num, inner.trim())
+                format!("${{{}:{}}}", ps_num, inner_content.trim())
             };
             
-            // Store replacement: (full range including inner content, placeholder)
             replacements.push((*ps_start, *pe_end, placeholder));
         }
     }
@@ -66,73 +61,21 @@ fn convert_doc_comment_placeholders(src: &str) -> String {
         result.replace_range(*start..*end, &placeholder);
     }
     
-    // Handle standalone #[doc = "p!(...)"] markers
-    let p_attr_matches: Vec<_> = DOC_ATTR_P_RE.captures_iter(&result).map(|cap| {
-        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
-         cap.get(1).unwrap().as_str().to_string())
-    }).collect();
-    
-    for (start, end, num) in p_attr_matches.iter().rev() {
+    // Handle standalone p! markers using regex
+    let p_markers: Vec<_> = DOC_P_RE.captures_iter(&result).map(|cap| {
+        let m = cap.get(0).unwrap();
+        let num = cap.get(2).unwrap().as_str();
+        
         let placeholder = if num == "0" {
             "$0".to_string()
         } else {
             format!("${{{}}}", num)
         };
-        result.replace_range(*start..*end, &placeholder);
-    }
-    
-    // Now handle line doc comment format (/// or //!)
-    let ps_matches: Vec<_> = DOC_PS_RE.captures_iter(&result).map(|cap| {
-        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(), 
-         cap.get(2).unwrap().as_str().to_string(),
-         cap.get(3).map(|c| c.as_str().to_string()))
+        
+        (m.start(), m.end(), placeholder)
     }).collect();
     
-    let pe_matches: Vec<_> = DOC_PE_RE.captures_iter(&result).map(|cap| {
-        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
-         cap.get(2).unwrap().as_str().to_string())
-    }).collect();
-    
-    // Match ps!/pe! pairs for line doc comments
-    let mut line_replacements = Vec::new();
-    
-    for (ps_start, ps_end, ps_num, choices) in ps_matches.iter() {
-        if let Some((pe_start, pe_end, _)) = pe_matches.iter()
-            .find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
-            
-            let inner = &result[*ps_end..*pe_start];
-            
-            let placeholder = if let Some(choice_str) = choices {
-                let choices_formatted = choice_str
-                    .split(',')
-                    .map(|s| s.trim())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("${{{}|{}|}}", ps_num, choices_formatted)
-            } else {
-                format!("${{{}:{}}}", ps_num, inner.trim())
-            };
-            
-            line_replacements.push((*ps_start, *pe_end, placeholder));
-        }
-    }
-    
-    for (start, end, placeholder) in line_replacements.iter().rev() {
-        result.replace_range(*start..*end, &placeholder);
-    }
-    
-    // Handle standalone /// p!(...) or //! p!(...) markers
-    let p_matches: Vec<_> = DOC_P_RE.captures_iter(&result).map(|cap| {
-        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
-         cap.get(2).unwrap().as_str().to_string())
-    }).collect();
-    
-    for (start, end, num) in p_matches.iter().rev() {
-        let placeholder = if num == "0" {
-            "$0".to_string()
-        } else {
-            format!("${{{}}}", num)
-        };
+    for (start, end, placeholder) in p_markers.iter().rev() {
         result.replace_range(*start..*end, &placeholder);
     }
     
@@ -317,6 +260,8 @@ pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {
         if let Some(formatted) = format_src(content) {
             println!("snippet {}", name);
             for line in formatted.lines() {
+                // Neosnippet uses the same placeholder syntax as VSCode
+                // No need to escape $ characters in placeholders
                 println!("    {}", line);
             }
             println!();
@@ -352,6 +297,8 @@ pub fn write_ultisnips(snippets: &BTreeMap<String, String>) {
     for (name, content) in snippets.iter() {
         if let Some(formatted) = format_src(content) {
             println!("snippet {}", name);
+            // Ultisnips uses ${n:default}, ${n|a,b|}, $0 syntax - same as our placeholders
+            // No escaping needed
             print!("{}", formatted);
             println!("endsnippet");
             println!();
