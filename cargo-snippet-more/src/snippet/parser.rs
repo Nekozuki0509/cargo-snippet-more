@@ -24,8 +24,8 @@ lazy_static! {
         .expect("Failed to compile doc comment regex");
 }
 
-struct MacroVisitor<'a> {
-    source: &'a str,
+struct MacroVisitor {
+    token_stream_source: String,
     snippets: Vec<Snippet>,
 }
 
@@ -48,7 +48,7 @@ impl VisitMut for RemoveSnippetAttrVisitor {
     }
 }
 
-impl<'a> Visit<'a> for MacroVisitor<'a> {
+impl<'a> Visit<'a> for MacroVisitor {
     fn visit_macro(&mut self, mac: &'a Macro) {
         
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
@@ -56,6 +56,7 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
             && let Some((name, params)) = parse_macro_params(mac) 
         {
+
             let snippet_name = match params.names.iter().next() {
                 Some(name) => name,
                 None => {
@@ -67,7 +68,7 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
             // Escape the snippet name to handle special regex characters
             let escaped_name = regex::escape(snippet_name);
             let pattern = format!(
-                r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#,
+                r#"(?s)(cargo_snippet_more\s*::\s*)?snippet_start\s*!\s*\(("{0}"|name\s*=\s*"{0}".*)\)\s*;.+(cargo_snippet_more\s*::\s*)?snippet_end\s*!\s*\("{0}"\)\s*;"#,
                 escaped_name
             );
             
@@ -79,7 +80,7 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
                 }
             };
             
-            let mut content = match re.find(self.source) {
+            let mut content = match re.find(&self.token_stream_source) {
                 Some(m) => m.as_str().to_string(),
                 None => {
                     log::error!("Could not find snippet '{}' in source", snippet_name);
@@ -97,9 +98,11 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
                 }
             };
 
+            let content = stringify_tokens(file, params.doc_hidden);
+
             self.snippets.push(Snippet {
                 name: name,
-                content: stringify_tokens(file, params.doc_hidden),
+                content,
                 attrs: params,
             });
         }
@@ -586,6 +589,7 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
     }
 
     let doc = unescape(doc_tt.to_string());
+    
     DOC_RE
         .captures(doc.as_str())
         .and_then(|caps| caps.get(1))
@@ -602,11 +606,21 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
         })
 }
 
+// Note: Placeholder conversion is NOT done in the parser.
+// The p! macro calls are kept as-is in the stringified tokens (they are valid Rust syntax).
+// Conversion to ${...} placeholder syntax happens in the writer just before output.
+
 fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
+    // Note: p! macros are NOT converted here - they stay as-is
+    // Conversion to ${...} syntax happens in the writer
     let mut res = String::new();
     let mut iter = tokens.into_iter().peekable();
     while let Some(tok) = iter.next() {
         match tok {
+            TokenTree::Ident(_) => {
+                res.push_str(tok.to_string().as_str());
+                res.push(' ');
+            }
             TokenTree::Punct(ref punct) => {
                 if punct.as_char() == '!' && iter.peek().map(next_token_is_doc).unwrap_or(false) {
                     // inner doc comment here.
@@ -661,6 +675,7 @@ fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
     res
 }
 
+
 // Get snippet names and snippet code (not formatted)
 fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     let default_name = get_default_snippet_name(&item);
@@ -670,12 +685,32 @@ fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     snip_attrs.map(|attrs| {
         remove_snippet_attr(&mut item);
         let doc_hidden = attrs.doc_hidden;
+        let content = stringify_tokens(item.into_token_stream(), doc_hidden);
         Snippet {
             name: default_name.unwrap_or_default(),
             attrs,
-            content: stringify_tokens(item.into_token_stream(), doc_hidden),
+            content,
         }
     })
+}
+
+fn get_snippet_from_item_recursive(item: Item) -> Vec<Snippet> {
+    let mut res = Vec::new();
+
+    if let Some(pair) = get_snippet_from_item(item.clone()) {
+        res.push(pair);
+    }
+
+    if let Item::Mod(mod_item) = item {
+        res.extend(
+            mod_item
+                .content
+                .into_iter()
+                .flat_map(|(_, items)| items.into_iter().flat_map(get_snippet_from_item_recursive)),
+        );
+    }
+
+    res
 }
 
 fn get_snippet_from_file(file: File) -> Vec<Snippet> {
@@ -692,16 +727,20 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
             remove_snippet_attr(item);
         });
         let doc_hidden = attrs.doc_hidden;
+        let content = stringify_tokens(file.into_token_stream(), doc_hidden);
         res.push(Snippet {
             name: String::new(),
             attrs,
-            content: stringify_tokens(file.into_token_stream(), doc_hidden),
+            content,
         })
     }
 
     res.extend({
+        // Use token stream source instead of raw source.
+        // Comment-based placeholders are not supported; only p! macro placeholders work.
+        let token_stream_source = file.to_token_stream().to_string();
         let mut visitor = MacroVisitor {
-            source: &file.to_token_stream().to_string(),
+            token_stream_source,
             snippets: vec![],
         };
         visitor.visit_file(&file);
@@ -723,6 +762,6 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
 
 pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
     parse_file(src)
-        .map(get_snippet_from_file)
+        .map(|file| get_snippet_from_file(file))
         .context("Failed to parse Rust source file")
 }

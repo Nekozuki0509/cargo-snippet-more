@@ -14,3 +14,74 @@ macro_rules! snippet_end {
 macro_rules! expanded {
     ($name:literal) => {};
 }
+
+/// Placeholder macro for defining interactive placeholders in snippets.
+///
+/// This macro creates placeholders that will be converted to editor-specific
+/// placeholder syntax in the generated snippets. It's the recommended way to
+/// specify placeholders in cargo-snippet-more as it's syntactically valid Rust
+/// and works in any expression or statement position.
+///
+/// # Why Macro-Based Placeholders?
+///
+/// Unlike comment-based approaches, the `p!` macro:
+/// - ✅ Is syntactically valid Rust that compiles and runs
+/// - ✅ Works with rustfmt and rust-analyzer
+/// - ✅ Can be placed in any expression/statement position
+/// - ✅ Provides type safety and IDE support
+///
+/// # Variants
+///
+/// - `p!(0)` - Final cursor position (converts to `$0`)
+/// - `p!(n)` - Placeholder without default value (converts to `${n}`)
+/// - `p!(n, |a, b, c|)` - Choice placeholder (converts to `${n|a,b,c|}`)
+/// - `p!(n, content)` - Placeholder with default value (converts to `${n:content}`)
+///
+/// # Examples
+///
+/// ## Basic Usage
+/// ```
+/// use cargo_snippet_more::p;
+///
+/// let p!(1, variable) = p!(2, 10);
+/// let mode = p!(3, |"read", "write"|);
+/// p!(0);
+/// ```
+///
+/// This generates:
+/// ```text
+/// let ${1:variable} = ${2:10};
+/// let mode = ${3|"read","write"|};
+/// $0
+/// ```
+///
+/// ## Advanced Example
+/// ```
+/// use cargo_snippet_more::p;
+///
+/// fn binary_search<T: Ord>(arr: &[T], target: &T) -> Option<usize> {
+///     let p!(1, mut low) = 0;
+///     let p!(2, mut high) = arr.len();
+///     while low < high {
+///         let p!(3, mid) = low + (high - low) / 2;
+///         match arr[mid].cmp(target) {
+///             std::cmp::Ordering::Less => low = mid + 1,
+///             std::cmp::Ordering::Equal => return Some(mid),
+///             std::cmp::Ordering::Greater => high = mid,
+///         }
+///     }
+///     p!(0);
+///     None
+/// }
+/// ```
+#[macro_export]
+macro_rules! p {
+    // p!(0) → $0 (final cursor position)
+    (0) => {};
+    // p!(n) → ${n} (no default value)
+    ($n:literal) => {};
+    // p!(n, |a, b, c|) → ${n|a,b,c|} (choices, expands to first choice at runtime)
+    ($n:literal, |$first:tt $(,$rest:tt)*|) => { $first };
+    // p!(n, content) → ${n:content}
+    ($n:literal, $($t:tt)*) => { $($t)* };
+}

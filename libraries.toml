@@ -1,5 +1,14 @@
-[library.childs]
+[library.childs.lib.childs]
+
+[library.childs.lib.files.test]
+name = "test_placeholder"
+dependencies = []
+content = 'fn test () {let p ! (1 , x ) = p ! (2 , 10 ) ; let mode = p ! (3 , | "read" , "write" | ) ; p ! (0 ) ; } fn test () {let p ! (1 , x ) = p ! (2 , 10 ) ; let mode = p ! (3 , | "read" , "write" | ) ; p ! (0 ) ; } '
 
 [library.files]
 
-[pathes]
+[[pathes.test_placeholder]]
+Path = "lib"
+
+[[pathes.test_placeholder]]
+Name = "test"
