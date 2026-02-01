@@ -3,84 +3,6 @@ use std::collections::BTreeMap;
 use regex::Regex;
 use lazy_static::lazy_static;
 
-/// Convert doc comment placeholders to placeholder syntax
-/// Supports: /// ps!(n), /// pe!(n), /// p!(n), //! ps!(n), etc.
-fn convert_doc_comment_placeholders(src: &str) -> String {
-    lazy_static! {
-        // Match line doc comment placeholder patterns
-        static ref DOC_PS_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)[ \t]*$").unwrap();
-        static ref DOC_PE_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*pe!\((\d+)\)[ \t]*$").unwrap();
-        static ref DOC_P_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*p!\((\d+)\)[ \t]*$").unwrap();
-    }
-    
-    let mut result = src.to_string();
-    
-    // Find all ps! and pe! markers
-    let ps_markers: Vec<_> = DOC_PS_RE.captures_iter(src).map(|cap| {
-        let m = cap.get(0).unwrap();
-        let num = cap.get(2).unwrap().as_str().to_string();
-        let choices = cap.get(3).map(|c| c.as_str().to_string());
-        (m.start(), m.end(), num, choices)
-    }).collect();
-    
-    let pe_markers: Vec<_> = DOC_PE_RE.captures_iter(src).map(|cap| {
-        let m = cap.get(0).unwrap();
-        let num = cap.get(2).unwrap().as_str().to_string();
-        (m.start(), m.end(), num)
-    }).collect();
-    
-    // Match ps!/pe! pairs and collect replacements using regex for content extraction
-    let mut replacements = Vec::new();
-    
-    for (ps_start, ps_end, ps_num, choices) in ps_markers.iter() {
-        // Find matching pe! marker
-        if let Some((pe_start, pe_end, _)) = pe_markers.iter()
-            .find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
-            
-            // Extract content between the markers
-            let inner_content = &src[*ps_end..*pe_start];
-            
-            let placeholder = if let Some(choice_str) = choices {
-                let choices_formatted = choice_str
-                    .split(',')
-                    .map(|s| s.trim())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("${{{}|{}|}}", ps_num, choices_formatted)
-            } else {
-                format!("${{{}:{}}}", ps_num, inner_content.trim())
-            };
-            
-            replacements.push((*ps_start, *pe_end, placeholder));
-        }
-    }
-    
-    // Apply replacements in reverse order to preserve positions
-    for (start, end, placeholder) in replacements.iter().rev() {
-        result.replace_range(*start..*end, &placeholder);
-    }
-    
-    // Handle standalone p! markers using regex
-    let p_markers: Vec<_> = DOC_P_RE.captures_iter(&result).map(|cap| {
-        let m = cap.get(0).unwrap();
-        let num = cap.get(2).unwrap().as_str();
-        
-        let placeholder = if num == "0" {
-            "$0".to_string()
-        } else {
-            format!("${{{}}}", num)
-        };
-        
-        (m.start(), m.end(), placeholder)
-    }).collect();
-    
-    for (start, end, placeholder) in p_markers.iter().rev() {
-        result.replace_range(*start..*end, &placeholder);
-    }
-    
-    result
-}
-
 /// Extract placeholders from source, replace with markers, return both
 fn extract_placeholders_for_formatting(src: &str) -> (String, Vec<(String, String)>) {
     lazy_static! {
@@ -132,11 +54,8 @@ struct VScode {
 
 #[cfg(feature = "inner_rustfmt")]
 pub fn format_src(src: &str) -> Option<String> {
-    // First, convert doc comment placeholders to placeholder syntax
-    let src_with_placeholders = convert_doc_comment_placeholders(src);
-    
     // Extract placeholders before formatting, format, then restore them
-    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(&src_with_placeholders);
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
     
     let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
     let mut rustfmt_config = rustfmt_nightly::Config::default();
@@ -172,11 +91,8 @@ pub fn format_src(src: &str) -> Option<String> {
 
 #[cfg(not(feature = "inner_rustfmt"))]
 pub fn format_src(src: &str) -> Option<String> {
-    // First, convert doc comment placeholders to placeholder syntax
-    let src_with_placeholders = convert_doc_comment_placeholders(src);
-    
     // Extract placeholders before formatting, format, then restore them
-    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(&src_with_placeholders);
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
     
     let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
 
