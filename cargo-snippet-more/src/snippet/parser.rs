@@ -7,7 +7,7 @@ use syn::visit::Visit;
 use syn::visit_mut::VisitMut;
 use syn::{Attribute, File, Item, Macro, Meta, MetaList, NestedMeta, parse_file};
 
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use std::{char, u32};
 
 use crate::snippet::snippet::{Snippet, SnippetAttributes};
@@ -606,178 +606,20 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
         })
 }
 
-// Visitor to collect placeholder macros (p!) and their replacements
-struct PlaceholderVisitor {
-    replacements: HashMap<String, String>,
-}
-
-impl PlaceholderVisitor {
-    fn new() -> Self {
-        PlaceholderVisitor {
-            replacements: HashMap::new(),
-        }
-    }
-}
-
-impl<'ast> Visit<'ast> for PlaceholderVisitor {
-    fn visit_macro(&mut self, mac: &'ast Macro) {
-        let path = mac.path.to_token_stream().to_string().replace(' ', "");
-        
-        if path == "p" || path == "cargo_snippet_more::p" {
-            // Convert the macro to a placeholder
-            if let Some(placeholder) = parse_placeholder_macro(mac.tokens.clone()) {
-                // Use the entire macro invocation as the key
-                let macro_str = format!("p ! {}", mac.tokens.to_string());
-                self.replacements.insert(macro_str.replace(' ', ""), placeholder);
-            }
-        }
-        
-        // Continue visiting nested macros
-        syn::visit::visit_macro(self, mac);
-    }
-}
-
-// Helper function to check if a token tree is a placeholder macro (p!)
-fn is_placeholder_macro(ident: &TokenTree, punct: Option<&TokenTree>) -> bool {
-    if let TokenTree::Ident(id) = ident {
-        if id.to_string() == "p" {
-            if let Some(TokenTree::Punct(p)) = punct {
-                return p.as_char() == '!';
-            }
-        }
-    }
-    false
-}
-
-// Parse and convert p! macro to placeholder syntax
-fn parse_placeholder_macro(tokens: TokenStream) -> Option<String> {
-    let tokens: Vec<TokenTree> = tokens.into_iter().collect();
-    
-    if tokens.is_empty() {
-        return None;
-    }
-    
-    // First token should be a literal (the number)
-    if let TokenTree::Literal(lit) = &tokens[0] {
-        let num_str = lit.to_string();
-        
-        // p!(0) → $0
-        if num_str == "0" && tokens.len() == 1 {
-            return Some("$0".to_string());
-        }
-        
-        // p!(n) → ${n}
-        if tokens.len() == 1 {
-            return Some(format!("${{{}}}", num_str));
-        }
-        
-        // Check for comma after number
-        if tokens.len() > 1 {
-            if let TokenTree::Punct(p) = &tokens[1] {
-                if p.as_char() == ',' && tokens.len() > 2 {
-                    // Check if it's a choice syntax: |a, b, c|
-                    if let TokenTree::Punct(p) = &tokens[2] {
-                        if p.as_char() == '|' {
-                            // Parse choices
-                            let mut choices = Vec::new();
-                            let mut i = 3;
-                            
-                            while i < tokens.len() {
-                                match &tokens[i] {
-                                    TokenTree::Punct(p) if p.as_char() == '|' => {
-                                        // End of choices
-                                        break;
-                                    }
-                                    TokenTree::Punct(p) if p.as_char() == ',' => {
-                                        // Skip comma separators
-                                        i += 1;
-                                        continue;
-                                    }
-                                    TokenTree::Ident(id) => {
-                                        choices.push(id.to_string());
-                                    }
-                                    TokenTree::Literal(lit) => {
-                                        choices.push(lit.to_string());
-                                    }
-                                    _ => {}
-                                }
-                                i += 1;
-                            }
-                            
-                            if !choices.is_empty() {
-                                return Some(format!("${{{}|{}|}}", num_str, choices.join(",")));
-                            }
-                        }
-                    }
-                    
-                    // Otherwise, it's p!(n, content) → ${n:content}
-                    // Collect remaining tokens as the default value
-                    let content_tokens: Vec<String> = tokens[2..]
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect();
-                    let content = content_tokens.join(" ");
-                    return Some(format!("${{{}:{}}}", num_str, content.trim()));
-                }
-            }
-        }
-    }
-    
-    None
-}
+// Note: Placeholder conversion is NOT done in the parser.
+// The p! macro calls are kept as-is in the stringified tokens (they are valid Rust syntax).
+// Conversion to ${...} placeholder syntax happens in the writer just before output.
 
 fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
-    // First, collect all placeholder macros using the visitor
-    let file = syn::parse2::<File>(tokens.clone());
-    let mut replacements = HashMap::new();
-    
-    if let Ok(file) = file {
-        let mut visitor = PlaceholderVisitor::new();
-        visitor.visit_file(&file);
-        replacements = visitor.replacements;
-    }
-    
-    // Now stringify tokens, replacing p! macros with placeholders
+    // Note: p! macros are NOT converted here - they stay as-is
+    // Conversion to ${...} syntax happens in the writer
     let mut res = String::new();
     let mut iter = tokens.into_iter().peekable();
     while let Some(tok) = iter.next() {
         match tok {
-            TokenTree::Ident(ref ident) => {
-                // Check if this is a placeholder macro
-                let peek = iter.peek();
-                if is_placeholder_macro(&tok, peek) {
-                    // Skip the '!' 
-                    iter.next();
-                    
-                    // Next should be a group with parentheses
-                    if let Some(TokenTree::Group(g)) = iter.next() {
-                        if g.delimiter() == Delimiter::Parenthesis {
-                            // Build the macro key
-                            let macro_key = format!("p!{}", g.to_string());
-                            
-                            // Check if we have a replacement
-                            if let Some(placeholder) = replacements.get(&macro_key) {
-                                res.push_str(placeholder);
-                                res.push(' ');
-                                continue;
-                            }
-                            
-                            // Fallback to direct parsing
-                            if let Some(placeholder) = parse_placeholder_macro(g.stream()) {
-                                res.push_str(&placeholder);
-                                res.push(' ');
-                                continue;
-                            }
-                        }
-                    }
-                    
-                    // If we couldn't parse it as a placeholder, output as-is
-                    res.push_str(ident.to_string().as_str());
-                    res.push(' ');
-                } else {
-                    res.push_str(tok.to_string().as_str());
-                    res.push(' ');
-                }
+            TokenTree::Ident(_) => {
+                res.push_str(tok.to_string().as_str());
+                res.push(' ');
             }
             TokenTree::Punct(ref punct) => {
                 if punct.as_char() == '!' && iter.peek().map(next_token_is_doc).unwrap_or(false) {

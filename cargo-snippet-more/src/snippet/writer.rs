@@ -3,48 +3,65 @@ use std::collections::BTreeMap;
 use regex::Regex;
 use lazy_static::lazy_static;
 
-/// Extract placeholders from source, replace with markers, return both
-fn extract_placeholders_for_formatting(src: &str) -> (String, Vec<(String, String)>) {
+/// Convert p! macros to placeholder syntax
+/// p!(0) → $0
+/// p!(n) → ${n}
+/// p!(n, content) → ${n:content}
+/// p!(n, |a, b, c|) → ${n|a,b,c|}
+fn convert_placeholders(src: &str) -> String {
     lazy_static! {
-        // Match all placeholder patterns: $0, ${n}, ${n:...}, ${n|...|} 
-        static ref PLACEHOLDER_RE: Regex = Regex::new(r"\$(?:0|\{\d+(?::[^}]*|\|[^}]*\|)?\})").unwrap();
+        // Match p!(...)  patterns
+        // Captures: p ! ( number [, rest] )
+        static ref P_MACRO_RE: Regex = Regex::new(r"p\s*!\s*\(\s*(\d+)\s*(?:,\s*([^)]+))?\s*\)").unwrap();
     }
     
-    let mut placeholder_map = Vec::new();
     let mut result = src.to_string();
-    let mut counter = 0;
     
-    // Replace each placeholder with a unique marker
-    for mat in PLACEHOLDER_RE.find_iter(src) {
-        let placeholder = mat.as_str();
-        let marker = format!("__PLACEHOLDER_{}__", counter);
-        placeholder_map.push((marker.clone(), placeholder.to_string()));
-        counter += 1;
-    }
-    
-    // Apply replacements in reverse order to preserve positions
-    for (marker, placeholder) in placeholder_map.iter().rev() {
-        result = result.replace(placeholder, marker);
-    }
-    
-    // Reverse the map so we can restore in forward order
-    placeholder_map.reverse();
-    
-    (result, placeholder_map)
-}
-
-/// Restore placeholders after formatting
-fn restore_placeholders_after_formatting(formatted: &str, placeholder_map: &[(String, String)]) -> String {
-    let mut result = formatted.to_string();
-    
-    // Replace markers back with placeholders
-    for (marker, placeholder) in placeholder_map {
-        result = result.replace(marker, placeholder);
+    // Process all p! macros
+    loop {
+        let before = result.clone();
+        result = P_MACRO_RE.replace_all(&result, |caps: &regex::Captures| {
+            let num = &caps[1];
+            
+            // Check if there's content after the number
+            if let Some(content) = caps.get(2) {
+                let content = content.as_str().trim();
+                
+                // Check if it's a choice pattern: | ... |
+                if content.starts_with('|') && content.ends_with('|') {
+                    // Extract choices between pipes
+                    let choices_str = &content[1..content.len()-1];
+                    // Split by comma and trim each choice
+                    let choices: Vec<&str> = choices_str.split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    
+                    if !choices.is_empty() {
+                        return format!("${{{}|{}|}}", num, choices.join(","));
+                    }
+                }
+                
+                // Otherwise it's p!(n, content) → ${n:content}
+                return format!("${{{}:{}}}", num, content);
+            }
+            
+            // p!(0) → $0 or p!(n) → ${n}
+            if num == "0" {
+                "$0".to_string()
+            } else {
+                format!("${{{}}}", num)
+            }
+        }).to_string();
+        
+        // If nothing changed, we're done
+        if result == before {
+            break;
+        }
     }
     
     result
 }
-
 
 #[derive(Serialize)]
 struct VScode {
@@ -54,10 +71,8 @@ struct VScode {
 
 #[cfg(feature = "inner_rustfmt")]
 pub fn format_src(src: &str) -> Option<String> {
-    // Extract placeholders before formatting, format, then restore them
-    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
-    
-    let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
+    // No need to extract/restore placeholders anymore - p! macros are valid Rust syntax
+    let src = format!("fn ___dummy___() {{{}}}", src);
     let mut rustfmt_config = rustfmt_nightly::Config::default();
     rustfmt_config
         .set()
@@ -81,8 +96,7 @@ pub fn format_src(src: &str) -> Option<String> {
 
             lines.next();
             lines.next_back();
-            let formatted = lines.collect::<Vec<_>>().join("\n");
-            restore_placeholders_after_formatting(&formatted, &placeholder_map)
+            lines.collect::<Vec<_>>().join("\n")
         })
     } else {
         None
@@ -91,15 +105,13 @@ pub fn format_src(src: &str) -> Option<String> {
 
 #[cfg(not(feature = "inner_rustfmt"))]
 pub fn format_src(src: &str) -> Option<String> {
-    // Extract placeholders before formatting, format, then restore them
-    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
-    
-    let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
+    // No need to extract/restore placeholders anymore - p! macros are valid Rust syntax
+    let src = format!("fn ___dummy___() {{{}}}", src);
 
     use std::io::Write;
     use std::process;
 
-    let mut command = process::Command::new("rustfmt")
+    let command = process::Command::new("rustfmt")
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
         .stderr(process::Stdio::piped())
@@ -137,7 +149,7 @@ pub fn format_src(src: &str) -> Option<String> {
     lines.next_back();
 
     let formatted = lines.collect::<Vec<_>>().join("\n");
-    Some(restore_placeholders_after_formatting(&formatted, &placeholder_map))
+    Some(formatted)
 }
 
 // Escape $ characters that are NOT part of placeholder syntax
@@ -173,8 +185,11 @@ fn escape_non_placeholder_dollars(line: &str) -> String {
 pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {
     for (name, content) in snippets.iter() {
         if let Some(formatted) = format_src(content) {
+            // Convert p! macros to placeholders just before output
+            let with_placeholders = convert_placeholders(&formatted);
+            
             println!("snippet {}", name);
-            for line in formatted.lines() {
+            for line in with_placeholders.lines() {
                 // Neosnippet uses the same placeholder syntax as VSCode
                 // No need to escape $ characters in placeholders
                 println!("    {}", line);
@@ -189,11 +204,14 @@ pub fn write_vscode(snippets: &BTreeMap<String, String>) {
         .iter()
         .filter_map(|(name, content)| {
             format_src(content).map(|formatted| {
+                // Convert p! macros to placeholders just before output
+                let with_placeholders = convert_placeholders(&formatted);
+                
                 (
                     name.to_owned(),
                     VScode {
                         prefix: name.to_owned(),
-                        body: formatted
+                        body: with_placeholders
                             .lines()
                             .map(|l| escape_non_placeholder_dollars(l))
                             .collect(),
@@ -211,10 +229,13 @@ pub fn write_vscode(snippets: &BTreeMap<String, String>) {
 pub fn write_ultisnips(snippets: &BTreeMap<String, String>) {
     for (name, content) in snippets.iter() {
         if let Some(formatted) = format_src(content) {
+            // Convert p! macros to placeholders just before output
+            let with_placeholders = convert_placeholders(&formatted);
+            
             println!("snippet {}", name);
             // Ultisnips uses ${n:default}, ${n|a,b|}, $0 syntax - same as our placeholders
             // No escaping needed
-            print!("{}", formatted);
+            print!("{}", with_placeholders);
             println!("endsnippet");
             println!();
         }
