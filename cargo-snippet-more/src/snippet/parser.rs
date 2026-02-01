@@ -321,7 +321,7 @@ fn get_default_snippet_name(item: &Item) -> Option<String> {
 }
 
 fn get_snippet_name(attr: &Attribute) -> Option<String> {
-    attr.parse_meta().ok().and_then(|m| get_snippet_name_from_meta(&m))
+    attr.parse_meta().ok().as_ref().and_then(get_snippet_name_from_meta)
 }
 
 fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
@@ -859,6 +859,86 @@ mod tests {
         "#;
         let result = snippets(src);
         assert!(result.contains_key("my_macro_snippet"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_multiple_functions() {
+        let src = r#"
+            snippet_start!("multi_function_snippet");
+            fn first() {
+                println!("first");
+            }
+            fn second() {
+                println!("second");
+            }
+            snippet_end!("multi_function_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("multi_function_snippet"));
+        let content = &result["multi_function_snippet"];
+        assert!(content.contains("first"));
+        assert!(content.contains("second"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_name_parameter() {
+        let src = r#"
+            snippet_start!(name = "named_snippet");
+            fn test() {}
+            snippet_end!("named_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("named_snippet"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_include() {
+        let src = r#"
+            snippet_start!("base_snippet");
+            fn base() {}
+            snippet_end!("base_snippet");
+
+            snippet_start!(name = "derived_snippet", include = "base_snippet");
+            fn derived() {}
+            snippet_end!("derived_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("base_snippet"));
+        assert!(result.contains_key("derived_snippet"));
+        let derived = &result["derived_snippet"];
+        assert!(derived.contains("base"));
+        assert!(derived.contains("derived"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_doc_hidden() {
+        let src = r#"
+            snippet_start!(name = "hidden_snippet", doc_hidden);
+            /// This doc should be hidden
+            fn hidden() {}
+            snippet_end!("hidden_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("hidden_snippet"));
+        let content = &result["hidden_snippet"];
+        // Doc comments should be hidden
+        assert!(!content.contains("This doc should be hidden"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_nested() {
+        let src = r#"
+            snippet_start!("outer");
+            fn outer_fn() {
+                snippet_start!("inner");
+                fn inner_fn() {}
+                snippet_end!("inner");
+            }
+            snippet_end!("outer");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("outer"));
+        assert!(result.contains_key("inner"));
     }
 
     #[test]

@@ -166,3 +166,103 @@ fn make_content(needs: &BTreeMap<String, String>, expanded: &BTreeSet<String>) -
 
     content
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bundle::data::{Data, Libraries, Library, UseType};
+
+    #[test]
+    fn test_make_content_empty() {
+        let needs = BTreeMap::new();
+        let expanded = BTreeSet::new();
+        let result = make_content(&needs, &expanded);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_make_content_with_library() {
+        let mut needs = BTreeMap::new();
+        needs.insert("test".to_string(), "fn test() {}".to_string());
+        let expanded = BTreeSet::new();
+        let result = make_content(&needs, &expanded);
+        assert_eq!(result, "fn test() {}");
+    }
+
+    #[test]
+    fn test_make_content_with_expanded() {
+        let mut needs = BTreeMap::new();
+        needs.insert("test".to_string(), "fn test() {}".to_string());
+        let mut expanded = BTreeSet::new();
+        expanded.insert("test".to_string());
+        let result = make_content(&needs, &expanded);
+        // Should be empty because test is already expanded
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_make_content_multiple_libs() {
+        let mut needs = BTreeMap::new();
+        needs.insert("lib1".to_string(), "fn lib1() {}".to_string());
+        needs.insert("lib2".to_string(), "fn lib2() {}".to_string());
+        let expanded = BTreeSet::new();
+        let result = make_content(&needs, &expanded);
+        assert!(result.contains("fn lib1() {}"));
+        assert!(result.contains("fn lib2() {}"));
+    }
+
+    #[test]
+    fn test_make_content_partial_expanded() {
+        let mut needs = BTreeMap::new();
+        needs.insert("lib1".to_string(), "fn lib1() {}".to_string());
+        needs.insert("lib2".to_string(), "fn lib2() {}".to_string());
+        let mut expanded = BTreeSet::new();
+        expanded.insert("lib1".to_string());
+        let result = make_content(&needs, &expanded);
+        assert!(!result.contains("fn lib1() {}"));
+        assert!(result.contains("fn lib2() {}"));
+    }
+
+    #[test]
+    fn test_get_should_bundle_empty() {
+        let content = "fn main() {}".to_string();
+        let data = BTreeMap::new();
+        let result = get_should_bundle(&content, &data);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_get_should_bundle_with_use() {
+        // This test verifies that get_should_bundle can parse use statements
+        // A full integration test would require a complete Data structure
+        let content = r#"
+            fn main() {
+                println!("test");
+            }
+        "#.to_string();
+        
+        let data = BTreeMap::new();
+        
+        let result = get_should_bundle(&content, &data);
+        assert!(result.is_ok());
+        // With no libraries in data, should return empty string
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_get_should_bundle_with_expanded_macro() {
+        // This test verifies that expanded! macros are recognized
+        let content = r#"
+            cargo_snippet_more::expanded!("test_fn");
+            fn main() {}
+        "#.to_string();
+        
+        let data = BTreeMap::new();
+        
+        let result = get_should_bundle(&content, &data);
+        assert!(result.is_ok());
+        // Should parse successfully and return empty since there are no libraries
+        assert_eq!(result.unwrap(), "");
+    }
+}

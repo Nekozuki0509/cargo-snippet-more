@@ -189,9 +189,10 @@ fn init() -> Result<()> {
         newbins = bintable
             .iter()
             .filter_map(|(name, table)| {
-                table.as_table()
-                    .and_then(|t| Some((t.get("alias")?, t.get("problem")?)))
-                    .map(|(alias, problem)| (name.to_string(), alias.clone(), problem.clone()))
+                let table = table.as_table()?;
+                let alias = table.get("alias")?;
+                let problem = table.get("problem")?;
+                Some((name.to_string(), alias.clone(), problem.clone()))
             })
             .collect::<Vec<_>>();
 
