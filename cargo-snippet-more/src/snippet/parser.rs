@@ -7,7 +7,7 @@ use syn::visit::Visit;
 use syn::visit_mut::VisitMut;
 use syn::{Attribute, File, Item, Macro, Meta, MetaList, NestedMeta, parse_file};
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::{char, u32};
 
 use crate::snippet::snippet::{Snippet, SnippetAttributes};
@@ -56,6 +56,7 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
             && let Some((name, params)) = parse_macro_params(mac) 
         {
+
             let snippet_name = match params.names.iter().next() {
                 Some(name) => name,
                 None => {
@@ -67,7 +68,7 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
             // Escape the snippet name to handle special regex characters
             let escaped_name = regex::escape(snippet_name);
             let pattern = format!(
-                r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#,
+                r#"(?s)(cargo_snippet_more\s*::\s*)?snippet_start\s*!\s*\(("{0}"|name\s*=\s*"{0}".*)\)\s*;.+(cargo_snippet_more\s*::\s*)?snippet_end\s*!\s*\("{0}"\)\s*;"#,
                 escaped_name
             );
             
@@ -97,9 +98,11 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
                 }
             };
 
+            let content = stringify_tokens(file, params.doc_hidden);
+
             self.snippets.push(Snippet {
                 name: name,
-                content: stringify_tokens(file, params.doc_hidden),
+                content,
                 attrs: params,
             });
         }
@@ -586,6 +589,7 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
     }
 
     let doc = unescape(doc_tt.to_string());
+    
     DOC_RE
         .captures(doc.as_str())
         .and_then(|caps| caps.get(1))
@@ -602,11 +606,179 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
         })
 }
 
+// Visitor to collect placeholder macros (p!) and their replacements
+struct PlaceholderVisitor {
+    replacements: HashMap<String, String>,
+}
+
+impl PlaceholderVisitor {
+    fn new() -> Self {
+        PlaceholderVisitor {
+            replacements: HashMap::new(),
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for PlaceholderVisitor {
+    fn visit_macro(&mut self, mac: &'ast Macro) {
+        let path = mac.path.to_token_stream().to_string().replace(' ', "");
+        
+        if path == "p" || path == "cargo_snippet_more::p" {
+            // Convert the macro to a placeholder
+            if let Some(placeholder) = parse_placeholder_macro(mac.tokens.clone()) {
+                // Use the entire macro invocation as the key
+                let macro_str = format!("p ! {}", mac.tokens.to_string());
+                self.replacements.insert(macro_str.replace(' ', ""), placeholder);
+            }
+        }
+        
+        // Continue visiting nested macros
+        syn::visit::visit_macro(self, mac);
+    }
+}
+
+// Helper function to check if a token tree is a placeholder macro (p!)
+fn is_placeholder_macro(ident: &TokenTree, punct: Option<&TokenTree>) -> bool {
+    if let TokenTree::Ident(id) = ident {
+        if id.to_string() == "p" {
+            if let Some(TokenTree::Punct(p)) = punct {
+                return p.as_char() == '!';
+            }
+        }
+    }
+    false
+}
+
+// Parse and convert p! macro to placeholder syntax
+fn parse_placeholder_macro(tokens: TokenStream) -> Option<String> {
+    let tokens: Vec<TokenTree> = tokens.into_iter().collect();
+    
+    if tokens.is_empty() {
+        return None;
+    }
+    
+    // First token should be a literal (the number)
+    if let TokenTree::Literal(lit) = &tokens[0] {
+        let num_str = lit.to_string();
+        
+        // p!(0) → $0
+        if num_str == "0" && tokens.len() == 1 {
+            return Some("$0".to_string());
+        }
+        
+        // p!(n) → ${n}
+        if tokens.len() == 1 {
+            return Some(format!("${{{}}}", num_str));
+        }
+        
+        // Check for comma after number
+        if tokens.len() > 1 {
+            if let TokenTree::Punct(p) = &tokens[1] {
+                if p.as_char() == ',' && tokens.len() > 2 {
+                    // Check if it's a choice syntax: |a, b, c|
+                    if let TokenTree::Punct(p) = &tokens[2] {
+                        if p.as_char() == '|' {
+                            // Parse choices
+                            let mut choices = Vec::new();
+                            let mut i = 3;
+                            
+                            while i < tokens.len() {
+                                match &tokens[i] {
+                                    TokenTree::Punct(p) if p.as_char() == '|' => {
+                                        // End of choices
+                                        break;
+                                    }
+                                    TokenTree::Punct(p) if p.as_char() == ',' => {
+                                        // Skip comma separators
+                                        i += 1;
+                                        continue;
+                                    }
+                                    TokenTree::Ident(id) => {
+                                        choices.push(id.to_string());
+                                    }
+                                    TokenTree::Literal(lit) => {
+                                        choices.push(lit.to_string());
+                                    }
+                                    _ => {}
+                                }
+                                i += 1;
+                            }
+                            
+                            if !choices.is_empty() {
+                                return Some(format!("${{{}|{}|}}", num_str, choices.join(",")));
+                            }
+                        }
+                    }
+                    
+                    // Otherwise, it's p!(n, content) → ${n:content}
+                    // Collect remaining tokens as the default value
+                    let content_tokens: Vec<String> = tokens[2..]
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect();
+                    let content = content_tokens.join(" ");
+                    return Some(format!("${{{}:{}}}", num_str, content.trim()));
+                }
+            }
+        }
+    }
+    
+    None
+}
+
 fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
+    // First, collect all placeholder macros using the visitor
+    let file = syn::parse2::<File>(tokens.clone());
+    let mut replacements = HashMap::new();
+    
+    if let Ok(file) = file {
+        let mut visitor = PlaceholderVisitor::new();
+        visitor.visit_file(&file);
+        replacements = visitor.replacements;
+    }
+    
+    // Now stringify tokens, replacing p! macros with placeholders
     let mut res = String::new();
     let mut iter = tokens.into_iter().peekable();
     while let Some(tok) = iter.next() {
         match tok {
+            TokenTree::Ident(ref ident) => {
+                // Check if this is a placeholder macro
+                let peek = iter.peek();
+                if is_placeholder_macro(&tok, peek) {
+                    // Skip the '!' 
+                    iter.next();
+                    
+                    // Next should be a group with parentheses
+                    if let Some(TokenTree::Group(g)) = iter.next() {
+                        if g.delimiter() == Delimiter::Parenthesis {
+                            // Build the macro key
+                            let macro_key = format!("p!{}", g.to_string());
+                            
+                            // Check if we have a replacement
+                            if let Some(placeholder) = replacements.get(&macro_key) {
+                                res.push_str(placeholder);
+                                res.push(' ');
+                                continue;
+                            }
+                            
+                            // Fallback to direct parsing
+                            if let Some(placeholder) = parse_placeholder_macro(g.stream()) {
+                                res.push_str(&placeholder);
+                                res.push(' ');
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    // If we couldn't parse it as a placeholder, output as-is
+                    res.push_str(ident.to_string().as_str());
+                    res.push(' ');
+                } else {
+                    res.push_str(tok.to_string().as_str());
+                    res.push(' ');
+                }
+            }
             TokenTree::Punct(ref punct) => {
                 if punct.as_char() == '!' && iter.peek().map(next_token_is_doc).unwrap_or(false) {
                     // inner doc comment here.
@@ -661,6 +833,7 @@ fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
     res
 }
 
+
 // Get snippet names and snippet code (not formatted)
 fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     let default_name = get_default_snippet_name(&item);
@@ -670,15 +843,35 @@ fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     snip_attrs.map(|attrs| {
         remove_snippet_attr(&mut item);
         let doc_hidden = attrs.doc_hidden;
+        let content = stringify_tokens(item.into_token_stream(), doc_hidden);
         Snippet {
             name: default_name.unwrap_or_default(),
             attrs,
-            content: stringify_tokens(item.into_token_stream(), doc_hidden),
+            content,
         }
     })
 }
 
-fn get_snippet_from_file(file: File) -> Vec<Snippet> {
+fn get_snippet_from_item_recursive(item: Item) -> Vec<Snippet> {
+    let mut res = Vec::new();
+
+    if let Some(pair) = get_snippet_from_item(item.clone()) {
+        res.push(pair);
+    }
+
+    if let Item::Mod(mod_item) = item {
+        res.extend(
+            mod_item
+                .content
+                .into_iter()
+                .flat_map(|(_, items)| items.into_iter().flat_map(get_snippet_from_item_recursive)),
+        );
+    }
+
+    res
+}
+
+fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
     let mut res = Vec::new();
     // whole code is snippet
     if let Some(attrs) = parse_attrs(&file.attrs, None) {
@@ -692,16 +885,17 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
             remove_snippet_attr(item);
         });
         let doc_hidden = attrs.doc_hidden;
+        let content = stringify_tokens(file.into_token_stream(), doc_hidden);
         res.push(Snippet {
             name: String::new(),
             attrs,
-            content: stringify_tokens(file.into_token_stream(), doc_hidden),
+            content,
         })
     }
 
     res.extend({
         let mut visitor = MacroVisitor {
-            source: &file.to_token_stream().to_string(),
+            source,  // Use original source with comments preserved
             snippets: vec![],
         };
         visitor.visit_file(&file);
@@ -723,6 +917,6 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
 
 pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
     parse_file(src)
-        .map(get_snippet_from_file)
+        .map(|file| get_snippet_from_file(file, src))
         .context("Failed to parse Rust source file")
 }

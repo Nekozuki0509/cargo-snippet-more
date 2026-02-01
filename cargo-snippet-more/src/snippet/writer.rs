@@ -1,5 +1,50 @@
 use serde_derive::Serialize;
 use std::collections::BTreeMap;
+use regex::Regex;
+use lazy_static::lazy_static;
+
+/// Extract placeholders from source, replace with markers, return both
+fn extract_placeholders_for_formatting(src: &str) -> (String, Vec<(String, String)>) {
+    lazy_static! {
+        // Match all placeholder patterns: $0, ${n}, ${n:...}, ${n|...|} 
+        static ref PLACEHOLDER_RE: Regex = Regex::new(r"\$(?:0|\{\d+(?::[^}]*|\|[^}]*\|)?\})").unwrap();
+    }
+    
+    let mut placeholder_map = Vec::new();
+    let mut result = src.to_string();
+    let mut counter = 0;
+    
+    // Replace each placeholder with a unique marker
+    for mat in PLACEHOLDER_RE.find_iter(src) {
+        let placeholder = mat.as_str();
+        let marker = format!("__PLACEHOLDER_{}__", counter);
+        placeholder_map.push((marker.clone(), placeholder.to_string()));
+        counter += 1;
+    }
+    
+    // Apply replacements in reverse order to preserve positions
+    for (marker, placeholder) in placeholder_map.iter().rev() {
+        result = result.replace(placeholder, marker);
+    }
+    
+    // Reverse the map so we can restore in forward order
+    placeholder_map.reverse();
+    
+    (result, placeholder_map)
+}
+
+/// Restore placeholders after formatting
+fn restore_placeholders_after_formatting(formatted: &str, placeholder_map: &[(String, String)]) -> String {
+    let mut result = formatted.to_string();
+    
+    // Replace markers back with placeholders
+    for (marker, placeholder) in placeholder_map {
+        result = result.replace(marker, placeholder);
+    }
+    
+    result
+}
+
 
 #[derive(Serialize)]
 struct VScode {
@@ -9,7 +54,10 @@ struct VScode {
 
 #[cfg(feature = "inner_rustfmt")]
 pub fn format_src(src: &str) -> Option<String> {
-    let src = format!("fn ___dummy___() {{{}}}", src);
+    // Extract placeholders before formatting, format, then restore them
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
+    
+    let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
     let mut rustfmt_config = rustfmt_nightly::Config::default();
     rustfmt_config
         .set()
@@ -33,7 +81,8 @@ pub fn format_src(src: &str) -> Option<String> {
 
             lines.next();
             lines.next_back();
-            lines.collect::<Vec<_>>().join("\n")
+            let formatted = lines.collect::<Vec<_>>().join("\n");
+            restore_placeholders_after_formatting(&formatted, &placeholder_map)
         })
     } else {
         None
@@ -42,7 +91,10 @@ pub fn format_src(src: &str) -> Option<String> {
 
 #[cfg(not(feature = "inner_rustfmt"))]
 pub fn format_src(src: &str) -> Option<String> {
-    let src = format!("fn ___dummy___() {{{}}}", src);
+    // Extract placeholders before formatting, format, then restore them
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
+    
+    let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
 
     use std::io::Write;
     use std::process;
@@ -84,7 +136,38 @@ pub fn format_src(src: &str) -> Option<String> {
     lines.next();
     lines.next_back();
 
-    Some(lines.collect::<Vec<_>>().join("\n"))
+    let formatted = lines.collect::<Vec<_>>().join("\n");
+    Some(restore_placeholders_after_formatting(&formatted, &placeholder_map))
+}
+
+// Escape $ characters that are NOT part of placeholder syntax
+fn escape_non_placeholder_dollars(line: &str) -> String {
+    use regex::Regex;
+    lazy_static::lazy_static! {
+        // Match placeholder patterns: $0, ${n}, ${n:...}, ${n|...|} 
+        static ref PLACEHOLDER_RE: Regex = Regex::new(r"\$(?:0|\{\d+(?::[^}]*|\|[^}]*\|)?\})").unwrap();
+    }
+    
+    let mut result = String::new();
+    let mut last_end = 0;
+    
+    // Find all placeholders
+    for mat in PLACEHOLDER_RE.find_iter(line) {
+        // Escape dollars in the text before this placeholder
+        let before = &line[last_end..mat.start()];
+        result.push_str(&before.replace("$", "\\$"));
+        
+        // Add the placeholder as-is (don't escape)
+        result.push_str(mat.as_str());
+        
+        last_end = mat.end();
+    }
+    
+    // Escape dollars in the remaining text
+    let after = &line[last_end..];
+    result.push_str(&after.replace("$", "\\$"));
+    
+    result
 }
 
 pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {
@@ -92,6 +175,8 @@ pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {
         if let Some(formatted) = format_src(content) {
             println!("snippet {}", name);
             for line in formatted.lines() {
+                // Neosnippet uses the same placeholder syntax as VSCode
+                // No need to escape $ characters in placeholders
                 println!("    {}", line);
             }
             println!();
@@ -110,9 +195,7 @@ pub fn write_vscode(snippets: &BTreeMap<String, String>) {
                         prefix: name.to_owned(),
                         body: formatted
                             .lines()
-                            .map(|l|
-                                // Escape "$" to disable placeholder
-                                l.to_owned().replace("$", "\\$"))
+                            .map(|l| escape_non_placeholder_dollars(l))
                             .collect(),
                     },
                 )
@@ -129,6 +212,8 @@ pub fn write_ultisnips(snippets: &BTreeMap<String, String>) {
     for (name, content) in snippets.iter() {
         if let Some(formatted) = format_src(content) {
             println!("snippet {}", name);
+            // Ultisnips uses ${n:default}, ${n|a,b|}, $0 syntax - same as our placeholders
+            // No escaping needed
             print!("{}", formatted);
             println!("endsnippet");
             println!();
