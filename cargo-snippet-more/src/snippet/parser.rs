@@ -7,7 +7,7 @@ use syn::visit::Visit;
 use syn::visit_mut::VisitMut;
 use syn::{Attribute, File, Item, Macro, Meta, MetaList, NestedMeta, parse_file};
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::{char, u32};
 
 use crate::snippet::snippet::{Snippet, SnippetAttributes};
@@ -609,6 +609,37 @@ fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Op
         })
 }
 
+// Visitor to collect placeholder macros (p!) and their replacements
+struct PlaceholderVisitor {
+    replacements: HashMap<String, String>,
+}
+
+impl PlaceholderVisitor {
+    fn new() -> Self {
+        PlaceholderVisitor {
+            replacements: HashMap::new(),
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for PlaceholderVisitor {
+    fn visit_macro(&mut self, mac: &'ast Macro) {
+        let path = mac.path.to_token_stream().to_string().replace(' ', "");
+        
+        if path == "p" || path == "cargo_snippet_more::p" {
+            // Convert the macro to a placeholder
+            if let Some(placeholder) = parse_placeholder_macro(mac.tokens.clone()) {
+                // Use the entire macro invocation as the key
+                let macro_str = format!("p ! {}", mac.tokens.to_string());
+                self.replacements.insert(macro_str.replace(' ', ""), placeholder);
+            }
+        }
+        
+        // Continue visiting nested macros
+        syn::visit::visit_macro(self, mac);
+    }
+}
+
 // Helper function to check if a token tree is a placeholder macro (p!)
 fn is_placeholder_macro(ident: &TokenTree, punct: Option<&TokenTree>) -> bool {
     if let TokenTree::Ident(id) = ident {
@@ -699,6 +730,17 @@ fn parse_placeholder_macro(tokens: TokenStream) -> Option<String> {
 }
 
 fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
+    // First, collect all placeholder macros using the visitor
+    let file = syn::parse2::<File>(tokens.clone());
+    let mut replacements = HashMap::new();
+    
+    if let Ok(file) = file {
+        let mut visitor = PlaceholderVisitor::new();
+        visitor.visit_file(&file);
+        replacements = visitor.replacements;
+    }
+    
+    // Now stringify tokens, replacing p! macros with placeholders
     let mut res = String::new();
     let mut iter = tokens.into_iter().peekable();
     while let Some(tok) = iter.next() {
@@ -713,6 +755,17 @@ fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
                     // Next should be a group with parentheses
                     if let Some(TokenTree::Group(g)) = iter.next() {
                         if g.delimiter() == Delimiter::Parenthesis {
+                            // Build the macro key
+                            let macro_key = format!("p!{}", g.to_string());
+                            
+                            // Check if we have a replacement
+                            if let Some(placeholder) = replacements.get(&macro_key) {
+                                res.push_str(placeholder);
+                                res.push(' ');
+                                continue;
+                            }
+                            
+                            // Fallback to direct parsing
                             if let Some(placeholder) = parse_placeholder_macro(g.stream()) {
                                 res.push_str(&placeholder);
                                 res.push(' ');
@@ -786,49 +839,28 @@ fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
 // Extract comment placeholder mapping from source without modifying it
 fn extract_comment_placeholders(content: &str) -> Vec<(String, String)> {
     lazy_static! {
-        static ref PS_RE: Regex = Regex::new(r"/\*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)\*/").unwrap();
-        static ref PE_RE: Regex = Regex::new(r"/\*pe!\((\d+)\)\*/").unwrap();
-        static ref P_RE: Regex = Regex::new(r"/\*p!\((\d+)\)\*/").unwrap();
+        // Match ps!/pe! pairs with the same number in one regex
+        static ref PS_PE_RE: Regex = Regex::new(r"/\*\s*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)\s*\*/(.*?)/\*\s*pe!\(\1\)\s*\*/").unwrap();
+        // Match standalone p! markers
+        static ref P_RE: Regex = Regex::new(r"/\*\s*p!\((\d+)\)\s*\*/").unwrap();
     }
     
     let mut mappings = Vec::new();
     
-    // Find ps! markers
-    let ps_markers: Vec<(usize, usize, String, Option<String>)> = PS_RE.captures_iter(content)
-        .filter_map(|cap| {
-            cap.get(0).map(|m| {
-                let num = cap.get(1).unwrap().as_str().to_string();
-                let choices = cap.get(2).map(|c| c.as_str().to_string());
-                (m.start(), m.end(), num, choices)
-            })
-        })
-        .collect();
-    
-    // Find pe! markers
-    let pe_markers: Vec<(usize, usize, String)> = PE_RE.captures_iter(content)
-        .filter_map(|cap| {
-            cap.get(0).map(|m| {
-                let num = cap.get(1).unwrap().as_str().to_string();
-                (m.start(), m.end(), num)
-            })
-        })
-        .collect();
-    
-    // Match ps!/pe! pairs
-    for (ps_start, ps_end, ps_num, choices) in ps_markers.iter() {
-        if let Some((pe_start, pe_end, _)) = pe_markers.iter().find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
-            let full_match = &content[*ps_start..*pe_end];
-            let inner = &content[*ps_end..*pe_start];
-            
-            let placeholder = if let Some(choice_str) = choices {
-                let choices_formatted = choice_str.split(',').map(|s| s.trim()).collect::<Vec<_>>().join(",");
-                format!("${{{}|{}|}}", ps_num, choices_formatted)
-            } else {
-                format!("${{{}:{}}}", ps_num, inner.trim())
-            };
-            
-            mappings.push((full_match.to_string(), placeholder));
-        }
+    // Find ps!/pe! pairs using backreference in regex
+    for cap in PS_PE_RE.captures_iter(content) {
+        let num = cap.get(1).unwrap().as_str();
+        let inner = cap.get(3).unwrap().as_str();
+        let full_match = cap.get(0).unwrap().as_str();
+        
+        let placeholder = if let Some(choices) = cap.get(2) {
+            let choices_formatted = choices.as_str().split(',').map(|s| s.trim()).collect::<Vec<_>>().join(",");
+            format!("${{{}|{}|}}", num, choices_formatted)
+        } else {
+            format!("${{{}:{}}}", num, inner.trim())
+        };
+        
+        mappings.push((full_match.to_string(), placeholder));
     }
     
     // Find standalone p! markers
@@ -948,6 +980,6 @@ fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
 
 pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
     parse_file(src)
-        .map(get_snippet_from_file)
+        .map(|file| get_snippet_from_file(file, src))
         .context("Failed to parse Rust source file")
 }
