@@ -37,8 +37,7 @@ fn convert_doc_comment_placeholders(src: &str) -> String {
         if let Some((pe_start, pe_end, _)) = pe_markers.iter()
             .find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
             
-            // Use regex to extract content between the markers (avoiding slicing)
-            let between_pattern = regex::escape(&src[*ps_end..*pe_start]);
+            // Extract content between the markers
             let inner_content = &src[*ps_end..*pe_start];
             
             let placeholder = if let Some(choice_str) = choices {
