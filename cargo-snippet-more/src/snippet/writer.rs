@@ -3,6 +3,142 @@ use std::collections::BTreeMap;
 use regex::Regex;
 use lazy_static::lazy_static;
 
+/// Convert doc comment placeholders to placeholder syntax
+/// Supports: #[doc = "ps!(n)"], #[doc = "pe!(n)"], #[doc = "p!(n)"]
+/// Also supports: /// ps!(n), /// pe!(n), /// p!(n), //! ps!(n), etc.
+fn convert_doc_comment_placeholders(src: &str) -> String {
+    lazy_static! {
+        // Match doc attribute placeholder patterns: #[doc = "ps!(...)"]
+        static ref DOC_ATTR_PS_RE: Regex = Regex::new(r#"\s*#\s*\[\s*doc\s*=\s*"ps!\((\d+)(?:,\s*\|([^|"]*)\|)?\)"\s*\]"#).unwrap();
+        static ref DOC_ATTR_PE_RE: Regex = Regex::new(r#"\s*#\s*\[\s*doc\s*=\s*"pe!\((\d+)\)"\s*\]"#).unwrap();
+        static ref DOC_ATTR_P_RE: Regex = Regex::new(r#"\s*#\s*\[\s*doc\s*=\s*"p!\((\d+)\)"\s*\]"#).unwrap();
+        
+        // Match line doc comment placeholder patterns: /// ps!(n) or //! ps!(n)
+        static ref DOC_PS_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)[ \t]*$").unwrap();
+        static ref DOC_PE_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*pe!\((\d+)\)[ \t]*$").unwrap();
+        static ref DOC_P_RE: Regex = Regex::new(r"(?m)^[ \t]*(///|//!)[ \t]*p!\((\d+)\)[ \t]*$").unwrap();
+    }
+    
+    let mut result = src.to_string();
+    
+    // First, handle #[doc = "..."] format ps!/pe! pairs
+    let ps_attr_matches: Vec<_> = DOC_ATTR_PS_RE.captures_iter(src).map(|cap| {
+        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(), 
+         cap.get(1).unwrap().as_str().to_string(),
+         cap.get(2).map(|c| c.as_str().to_string()))
+    }).collect();
+    
+    let pe_attr_matches: Vec<_> = DOC_ATTR_PE_RE.captures_iter(src).map(|cap| {
+        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
+         cap.get(1).unwrap().as_str().to_string())
+    }).collect();
+    
+    // Match ps!/pe! pairs and collect replacements
+    let mut replacements = Vec::new();
+    
+    for (ps_start, ps_end, ps_num, choices) in ps_attr_matches.iter() {
+        // Find matching pe! marker
+        if let Some((pe_start, pe_end, _)) = pe_attr_matches.iter()
+            .find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
+            
+            // Extract content between markers
+            let inner = &src[*ps_end..*pe_start];
+            
+            // Create placeholder
+            let placeholder = if let Some(choice_str) = choices {
+                let choices_formatted = choice_str
+                    .split(',')
+                    .map(|s| s.trim())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("${{{}|{}|}}", ps_num, choices_formatted)
+            } else {
+                format!("${{{}:{}}}", ps_num, inner.trim())
+            };
+            
+            // Store replacement: (full range including inner content, placeholder)
+            replacements.push((*ps_start, *pe_end, placeholder));
+        }
+    }
+    
+    // Apply replacements in reverse order to preserve positions
+    for (start, end, placeholder) in replacements.iter().rev() {
+        result.replace_range(*start..*end, &placeholder);
+    }
+    
+    // Handle standalone #[doc = "p!(...)"] markers
+    let p_attr_matches: Vec<_> = DOC_ATTR_P_RE.captures_iter(&result).map(|cap| {
+        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
+         cap.get(1).unwrap().as_str().to_string())
+    }).collect();
+    
+    for (start, end, num) in p_attr_matches.iter().rev() {
+        let placeholder = if num == "0" {
+            "$0".to_string()
+        } else {
+            format!("${{{}}}", num)
+        };
+        result.replace_range(*start..*end, &placeholder);
+    }
+    
+    // Now handle line doc comment format (/// or //!)
+    let ps_matches: Vec<_> = DOC_PS_RE.captures_iter(&result).map(|cap| {
+        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(), 
+         cap.get(2).unwrap().as_str().to_string(),
+         cap.get(3).map(|c| c.as_str().to_string()))
+    }).collect();
+    
+    let pe_matches: Vec<_> = DOC_PE_RE.captures_iter(&result).map(|cap| {
+        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
+         cap.get(2).unwrap().as_str().to_string())
+    }).collect();
+    
+    // Match ps!/pe! pairs for line doc comments
+    let mut line_replacements = Vec::new();
+    
+    for (ps_start, ps_end, ps_num, choices) in ps_matches.iter() {
+        if let Some((pe_start, pe_end, _)) = pe_matches.iter()
+            .find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end) {
+            
+            let inner = &result[*ps_end..*pe_start];
+            
+            let placeholder = if let Some(choice_str) = choices {
+                let choices_formatted = choice_str
+                    .split(',')
+                    .map(|s| s.trim())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("${{{}|{}|}}", ps_num, choices_formatted)
+            } else {
+                format!("${{{}:{}}}", ps_num, inner.trim())
+            };
+            
+            line_replacements.push((*ps_start, *pe_end, placeholder));
+        }
+    }
+    
+    for (start, end, placeholder) in line_replacements.iter().rev() {
+        result.replace_range(*start..*end, &placeholder);
+    }
+    
+    // Handle standalone /// p!(...) or //! p!(...) markers
+    let p_matches: Vec<_> = DOC_P_RE.captures_iter(&result).map(|cap| {
+        (cap.get(0).unwrap().start(), cap.get(0).unwrap().end(),
+         cap.get(2).unwrap().as_str().to_string())
+    }).collect();
+    
+    for (start, end, num) in p_matches.iter().rev() {
+        let placeholder = if num == "0" {
+            "$0".to_string()
+        } else {
+            format!("${{{}}}", num)
+        };
+        result.replace_range(*start..*end, &placeholder);
+    }
+    
+    result
+}
+
 /// Extract placeholders from source, replace with markers, return both
 fn extract_placeholders_for_formatting(src: &str) -> (String, Vec<(String, String)>) {
     lazy_static! {
@@ -54,8 +190,11 @@ struct VScode {
 
 #[cfg(feature = "inner_rustfmt")]
 pub fn format_src(src: &str) -> Option<String> {
+    // First, convert doc comment placeholders to placeholder syntax
+    let src_with_placeholders = convert_doc_comment_placeholders(src);
+    
     // Extract placeholders before formatting, format, then restore them
-    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(&src_with_placeholders);
     
     let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
     let mut rustfmt_config = rustfmt_nightly::Config::default();
@@ -91,8 +230,11 @@ pub fn format_src(src: &str) -> Option<String> {
 
 #[cfg(not(feature = "inner_rustfmt"))]
 pub fn format_src(src: &str) -> Option<String> {
+    // First, convert doc comment placeholders to placeholder syntax
+    let src_with_placeholders = convert_doc_comment_placeholders(src);
+    
     // Extract placeholders before formatting, format, then restore them
-    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(src);
+    let (src_without_placeholders, placeholder_map) = extract_placeholders_for_formatting(&src_with_placeholders);
     
     let src = format!("fn ___dummy___() {{{}}}", src_without_placeholders);
 
