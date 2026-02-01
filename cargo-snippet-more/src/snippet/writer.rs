@@ -15,52 +15,39 @@ fn convert_placeholders(src: &str) -> String {
         static ref P_MACRO_RE: Regex = Regex::new(r"p\s*!\s*\(\s*(\d+)\s*(?:,\s*([^)]+))?\s*\)").unwrap();
     }
     
-    let mut result = src.to_string();
-    
-    // Process all p! macros
-    loop {
-        let before = result.clone();
-        result = P_MACRO_RE.replace_all(&result, |caps: &regex::Captures| {
-            let num = &caps[1];
-            
-            // Check if there's content after the number
-            if let Some(content) = caps.get(2) {
-                let content = content.as_str().trim();
-                
-                // Check if it's a choice pattern: | ... |
-                if content.starts_with('|') && content.ends_with('|') {
-                    // Extract choices between pipes
-                    let choices_str = &content[1..content.len()-1];
-                    // Split by comma and trim each choice
-                    let choices: Vec<&str> = choices_str.split(',')
-                        .map(|s| s.trim())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    
-                    if !choices.is_empty() {
-                        return format!("${{{}|{}|}}", num, choices.join(","));
-                    }
-                }
-                
-                // Otherwise it's p!(n, content) → ${n:content}
-                return format!("${{{}:{}}}", num, content);
-            }
-            
-            // p!(0) → $0 or p!(n) → ${n}
-            if num == "0" {
-                "$0".to_string()
-            } else {
-                format!("${{{}}}", num)
-            }
-        }).to_string();
+    P_MACRO_RE.replace_all(src, |caps: &regex::Captures| {
+        let num = &caps[1];
         
-        // If nothing changed, we're done
-        if result == before {
-            break;
+        // Check if there's content after the number
+        if let Some(content) = caps.get(2) {
+            let content = content.as_str().trim();
+            
+            // Check if it's a choice pattern: | ... |
+            if content.starts_with('|') && content.ends_with('|') {
+                // Extract choices between pipes
+                let choices_str = &content[1..content.len()-1];
+                // Split by comma and trim each choice
+                let choices: Vec<&str> = choices_str.split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                
+                if !choices.is_empty() {
+                    return format!("${{{}|{}|}}", num, choices.join(","));
+                }
+            }
+            
+            // Otherwise it's p!(n, content) → ${n:content}
+            return format!("${{{}:{}}}", num, content);
         }
-    }
-    
-    result
+        
+        // p!(0) → $0 or p!(n) → ${n}
+        if num == "0" {
+            "$0".to_string()
+        } else {
+            format!("${{{}}}", num)
+        }
+    }).to_string()
 }
 
 #[derive(Serialize)]
