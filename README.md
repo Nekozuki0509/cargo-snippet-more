@@ -488,6 +488,74 @@ fn main() {
 - **For platform libraries**: Use `expanded!()` only for libraries that exist on the contest server (like proconio, superslice on AtCoder)
 - When you run `cargo-snippet-more bundle`, your custom library code will be inlined into the output file
 
+### Advanced `expanded!()` Techniques
+
+The `expanded!()` macro has powerful use cases beyond just marking platform libraries:
+
+**Use Case 1: Editing a Dependency While Keeping Dependents Unchanged**
+
+When you have library functions that depend on each other and want to customize one without re-bundling everything:
+
+```rust
+// In your binary (e.g., src/bin/problem.rs)
+use my_library::gcd;
+use my_library::gcd_list;
+
+// Expand and edit the gcd function inline
+cargo_snippet_more::expanded!("gcd");
+
+// Custom implementation of gcd for this specific problem
+fn gcd(a: u64, b: u64) -> u64 {
+    // Add custom processing here
+    println!("Computing GCD of {} and {}", a, b);
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+fn main() {
+    // gcd_list will be bundled and will call YOUR custom gcd above
+    let result = gcd_list(&[48, 18, 12]);
+    println!("{}", result);
+}
+```
+
+In this example:
+- `gcd` is expanded inline (marked with `expanded!()`) and customized
+- `gcd_list` is bundled automatically from your library
+- When bundled, `gcd_list` calls your customized `gcd` function, not the library version
+
+**Use Case 2: Replacing Custom Library Dependencies with Platform Libraries**
+
+When your custom library depends on another custom library, but you want to use a platform library instead:
+
+```rust
+// Suppose your custom library has a graph algorithm that depends on your custom graph structure
+// But AtCoder provides petgraph, which you want to use instead
+
+use petgraph::Graph;
+use my_library::shortest_path;  // This depends on a custom graph structure
+
+// Mark your custom graph structure as expanded (skip bundling it)
+cargo_snippet_more::expanded!("MyGraph");
+
+// The platform library (petgraph) is available on AtCoder
+// shortest_path will now use petgraph::Graph instead of your custom MyGraph
+
+fn main() {
+    let graph = Graph::new();
+    // shortest_path is bundled, but uses petgraph instead of custom graph
+    let result = shortest_path(&graph, 0, 5);
+    println!("{}", result);
+}
+```
+
+**Other Platform Libraries on AtCoder:**
+- `proconio` - Input handling
+- `superslice` - Extended slice operations  
+- `petgraph` - Graph algorithms
+- `indexmap` - Ordered hash maps
+
+By marking your custom library component as `expanded!()`, you tell cargo-snippet-more to skip bundling it, allowing the platform library to be used instead.
+
 #### 6. Bundle the Binary
 
 Create the bundled version:
