@@ -75,15 +75,16 @@ pub fn format_src(src: &str) -> Option<String> {
         .format(input)
         .is_ok()
     {
-        String::from_utf8(out).ok().map(|s| {
-            let mut lines = s
+        String::from_utf8(out).ok().and_then(|s| {
+            let replaced = s
                 .replace("\r\n", "\n")
-                .replace("#[rustfmt::skip]", "")
-                .lines();
+                .replace("#[rustfmt::skip]", "");
+            let mut lines = replaced.lines();
 
             lines.next();
             lines.next_back();
-            lines.collect::<Vec<_>>().join("\n")
+            let result = lines.collect::<Vec<_>>().join("\n");
+            Some(result)
         })
     } else {
         None

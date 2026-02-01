@@ -200,10 +200,7 @@ fn parse_macro_params(mac: &Macro) -> Option<(String, SnippetAttributes)> {
 }
 
 fn is_snippet_path(path: &str) -> bool {
-    match path {
-        "snippet" | "cargo_snippet_more :: snippet" => true,
-        _ => false,
-    }
+    matches!(path, "snippet" | "cargo_snippet_more :: snippet")
 }
 
 macro_rules! get_attrs_impl {
@@ -321,7 +318,7 @@ fn get_default_snippet_name(item: &Item) -> Option<String> {
 }
 
 fn get_snippet_name(attr: &Attribute) -> Option<String> {
-    attr.parse_meta().ok().as_ref().and_then(get_snippet_name_from_meta)
+    attr.parse_meta().ok().and_then(|m| get_snippet_name_from_meta(&m))
 }
 
 fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
@@ -337,7 +334,7 @@ fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
             .filter_map(|item| match item {
                 NestedMeta::Meta(Meta::NameValue(nv)) => {
                     if nv.path.to_token_stream().to_string() == "name" {
-                        Some(unquote(&nv.lit.clone().into_token_stream().to_string()))
+                        Some(unquote(&nv.lit.to_token_stream().to_string()))
                     } else {
                         None
                     }
@@ -349,7 +346,7 @@ fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
             })
             .next(),
         // #[snippet=".."]
-        Meta::NameValue(nv) => Some(unquote(&nv.lit.clone().into_token_stream().to_string())),
+        Meta::NameValue(nv) => Some(unquote(&nv.lit.to_token_stream().to_string())),
         _ => None,
     }
 }
@@ -370,7 +367,7 @@ fn get_snippet_uses(attr: &Attribute) -> Option<Vec<String>> {
                         // It can't use "use" keyword here xD.
                         // It is reserved.
                         if nv.path.to_token_stream().to_string() == "include" {
-                            let uses = unquote(&nv.lit.clone().into_token_stream().to_string());
+                            let uses = unquote(&nv.lit.to_token_stream().to_string());
                             Some(
                                 uses.split(',')
                                     .map(|s| s.trim())
@@ -483,8 +480,7 @@ fn parse_attrs(
 
     let prefix = attrs
         .iter()
-        .map(|attr| get_simple_attr(attr, "prefix").into_iter())
-        .flatten()
+        .flat_map(|attr| get_simple_attr(attr, "prefix"))
         .collect::<Vec<_>>()
         .join("\n");
 

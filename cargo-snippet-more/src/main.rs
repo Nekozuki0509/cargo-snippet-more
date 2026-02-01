@@ -31,13 +31,7 @@ use crate::snippet::snippet::process_snippets;
 
 /// Report error and continue.
 fn report_error<T>(result: Result<T, Error>) -> Option<T> {
-    match result {
-        Ok(x) => Some(x),
-        Err(e) => {
-            error!("{}", e);
-            None
-        }
-    }
+    result.inspect_err(|e| error!("{}", e)).ok()
 }
 
 fn main() {

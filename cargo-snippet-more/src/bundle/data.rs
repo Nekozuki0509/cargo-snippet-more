@@ -59,8 +59,7 @@ impl Data {
                 name.clone(),
                 lib.path
                     .iter()
-                    .cloned()
-                    .map(|x| UseType::Path(x))
+                    .map(|x| UseType::Path(x.clone()))
                     .chain(once(UseType::Name(lib.name.clone())))
                     .collect(),
             );
@@ -69,14 +68,14 @@ impl Data {
                 s = s
                     .childs
                     .entry(i.clone())
-                    .or_insert(Box::new(Libraries::new()));
+                    .or_insert_with(|| Box::new(Libraries::new()));
             }
 
             s.files.insert(
                 lib.name.clone(),
                 Library {
                     name: name.clone(),
-                    dependencies: deps.get(&name).unwrap_or(&BTreeSet::new()).clone(),
+                    dependencies: deps.get(&name).cloned().unwrap_or_default(),
                     content: lib.content.clone(),
                 },
             );

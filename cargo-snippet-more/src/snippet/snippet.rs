@@ -84,7 +84,7 @@ pub fn process_snippets(
 
                 for dep in &snip.attrs.uses {
                     deps.entry(name.clone())
-                        .or_insert_with(BTreeSet::new)
+                        .or_default()
                         .insert(dep.clone());
                 }
             }
