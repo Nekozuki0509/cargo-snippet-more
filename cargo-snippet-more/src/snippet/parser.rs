@@ -24,8 +24,8 @@ lazy_static! {
         .expect("Failed to compile doc comment regex");
 }
 
-struct MacroVisitor<'a> {
-    source: &'a str,
+struct MacroVisitor {
+    file_content: String,
     snippets: Vec<Snippet>,
 }
 
@@ -48,7 +48,7 @@ impl VisitMut for RemoveSnippetAttrVisitor {
     }
 }
 
-impl<'a> Visit<'a> for MacroVisitor<'a> {
+impl<'a> Visit<'a> for MacroVisitor {
     fn visit_macro(&mut self, mac: &'a Macro) {
         
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
@@ -80,7 +80,7 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
                 }
             };
             
-            let mut content = match re.find(self.source) {
+            let mut content = match re.find(&self.file_content) {
                 Some(m) => m.as_str().to_string(),
                 None => {
                     log::error!("Could not find snippet '{}' in source", snippet_name);
@@ -713,7 +713,7 @@ fn get_snippet_from_item_recursive(item: Item) -> Vec<Snippet> {
     res
 }
 
-fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
+fn get_snippet_from_file(file: File) -> Vec<Snippet> {
     let mut res = Vec::new();
     // whole code is snippet
     if let Some(attrs) = parse_attrs(&file.attrs, None) {
@@ -736,8 +736,9 @@ fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
     }
 
     res.extend({
+        let file_content = file.to_token_stream().to_string();
         let mut visitor = MacroVisitor {
-            source,  // Use original source with comments preserved
+            file_content,
             snippets: vec![],
         };
         visitor.visit_file(&file);
@@ -759,6 +760,6 @@ fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
 
 pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
     parse_file(src)
-        .map(|file| get_snippet_from_file(file, src))
+        .map(|file| get_snippet_from_file(file))
         .context("Failed to parse Rust source file")
 }
