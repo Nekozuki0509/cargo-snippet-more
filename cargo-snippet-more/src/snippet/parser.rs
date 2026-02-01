@@ -154,9 +154,12 @@ fn parse_macro_params(mac: &Macro) -> Option<(String, SnippetAttributes)> {
                                 attrs.names.insert(value);
                             }
                             "include" => {
-                                for u in value.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-                                    attrs.uses.insert(u.to_string());
-                                }
+                                attrs.uses.extend(
+                                    value.split(',')
+                                        .map(str::trim)
+                                        .filter(|s| !s.is_empty())
+                                        .map(String::from)
+                                );
                             }
                             "prefix" => {
                                 if !attrs.prefix.is_empty() {
@@ -175,7 +178,7 @@ fn parse_macro_params(mac: &Macro) -> Option<(String, SnippetAttributes)> {
                     continue;
                 } 
 
-                if key.as_str() == "doc_hidden" {
+                if key == "doc_hidden" {
                     attrs.doc_hidden = true;
                 }
 
@@ -200,10 +203,7 @@ fn parse_macro_params(mac: &Macro) -> Option<(String, SnippetAttributes)> {
 }
 
 fn is_snippet_path(path: &str) -> bool {
-    match path {
-        "snippet" | "cargo_snippet_more :: snippet" => true,
-        _ => false,
-    }
+    matches!(path, "snippet" | "cargo_snippet_more :: snippet")
 }
 
 macro_rules! get_attrs_impl {
@@ -337,7 +337,7 @@ fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
             .filter_map(|item| match item {
                 NestedMeta::Meta(Meta::NameValue(nv)) => {
                     if nv.path.to_token_stream().to_string() == "name" {
-                        Some(unquote(&nv.lit.clone().into_token_stream().to_string()))
+                        Some(unquote(&nv.lit.to_token_stream().to_string()))
                     } else {
                         None
                     }
@@ -349,7 +349,7 @@ fn get_snippet_name_from_meta(metaitem: &Meta) -> Option<String> {
             })
             .next(),
         // #[snippet=".."]
-        Meta::NameValue(nv) => Some(unquote(&nv.lit.clone().into_token_stream().to_string())),
+        Meta::NameValue(nv) => Some(unquote(&nv.lit.to_token_stream().to_string())),
         _ => None,
     }
 }
@@ -370,12 +370,12 @@ fn get_snippet_uses(attr: &Attribute) -> Option<Vec<String>> {
                         // It can't use "use" keyword here xD.
                         // It is reserved.
                         if nv.path.to_token_stream().to_string() == "include" {
-                            let uses = unquote(&nv.lit.clone().into_token_stream().to_string());
+                            let uses = unquote(&nv.lit.to_token_stream().to_string());
                             Some(
                                 uses.split(',')
-                                    .map(|s| s.trim())
+                                    .map(str::trim)
                                     .filter(|s| !s.is_empty())
-                                    .map(|s| s.to_string())
+                                    .map(String::from)
                                     .collect(),
                             )
                         } else {
@@ -483,8 +483,7 @@ fn parse_attrs(
 
     let prefix = attrs
         .iter()
-        .map(|attr| get_simple_attr(attr, "prefix").into_iter())
-        .flatten()
+        .flat_map(|attr| get_simple_attr(attr, "prefix"))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -764,4 +763,214 @@ pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
     parse_file(src)
         .map(|file| get_snippet_from_file(file))
         .context("Failed to parse Rust source file")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_snippet, unescape};
+    use crate::snippet::snippet::process_snippets;
+    use crate::snippet::writer::format_src;
+    use std::collections::BTreeMap;
+
+    fn snippets(src: &str) -> BTreeMap<String, String> {
+        let snippets = parse_snippet(src).unwrap();
+        process_snippets(vec![(vec![], snippets)]).1
+    }
+
+    #[test]
+    fn test_unescape() {
+        assert_eq!(unescape(r#"hello"#), "hello");
+        assert_eq!(unescape(r#"hello\nworld"#), "hello\nworld");
+        assert_eq!(unescape(r#"hello\tworld"#), "hello\tworld");
+        assert_eq!(unescape(r#"hello\rworld"#), "hello\rworld");
+        assert_eq!(unescape(r#"hello\"world"#), "hello\"world");
+        assert_eq!(unescape(r#"hello\\world"#), "hello\\world");
+        assert_eq!(unescape(r#"\u{1F600}"#), "😀");
+        assert_eq!(unescape(r#"\u{3042}"#), "あ");
+    }
+
+    #[test]
+    fn test_parse_simple_snippet() {
+        let src = r#"
+            #[snippet]
+            fn foo() {
+                println!("hello");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("foo"));
+    }
+
+    #[test]
+    fn test_parse_snippet_with_name() {
+        let src = r#"
+            #[snippet(name = "my_snippet")]
+            fn foo() {
+                println!("hello");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("my_snippet"));
+    }
+
+    #[test]
+    fn test_parse_snippet_with_include() {
+        let src = r#"
+            #[snippet(name = "base")]
+            fn base_fn() {
+                println!("base");
+            }
+
+            #[snippet(name = "derived", include = "base")]
+            fn derived_fn() {
+                println!("derived");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("base"));
+        assert!(result.contains_key("derived"));
+        let derived = &result["derived"];
+        assert!(derived.contains("base_fn"));
+        assert!(derived.contains("derived_fn"));
+    }
+
+    #[test]
+    fn test_parse_snippet_with_prefix() {
+        let src = r#"
+            #[snippet(name = "with_prefix", prefix = "use std::io::*;")]
+            fn foo() {
+                println!("hello");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("with_prefix"));
+        let content = &result["with_prefix"];
+        assert!(content.contains("use std::io::*;"));
+    }
+
+    #[test]
+    fn test_parse_snippet_macro_style() {
+        let src = r#"
+            snippet_start!("my_macro_snippet");
+            fn bar() {
+                println!("bar");
+            }
+            snippet_end!("my_macro_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("my_macro_snippet"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_multiple_functions() {
+        let src = r#"
+            snippet_start!("multi_function_snippet");
+            fn first() {
+                println!("first");
+            }
+            fn second() {
+                println!("second");
+            }
+            snippet_end!("multi_function_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("multi_function_snippet"));
+        let content = &result["multi_function_snippet"];
+        assert!(content.contains("first"));
+        assert!(content.contains("second"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_name_parameter() {
+        let src = r#"
+            snippet_start!(name = "named_snippet");
+            fn test() {}
+            snippet_end!("named_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("named_snippet"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_include() {
+        let src = r#"
+            snippet_start!("base_snippet");
+            fn base() {}
+            snippet_end!("base_snippet");
+
+            snippet_start!(name = "derived_snippet", include = "base_snippet");
+            fn derived() {}
+            snippet_end!("derived_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("base_snippet"));
+        assert!(result.contains_key("derived_snippet"));
+        let derived = &result["derived_snippet"];
+        assert!(derived.contains("base"));
+        assert!(derived.contains("derived"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_with_doc_hidden() {
+        let src = r#"
+            snippet_start!(name = "hidden_snippet", doc_hidden);
+            /// This doc should be hidden
+            fn hidden() {}
+            snippet_end!("hidden_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("hidden_snippet"));
+        let content = &result["hidden_snippet"];
+        // Doc comments should be hidden
+        assert!(!content.contains("This doc should be hidden"));
+    }
+
+    #[test]
+    fn test_snippet_start_end_nested() {
+        let src = r#"
+            snippet_start!("outer");
+            fn outer_fn() {
+                snippet_start!("inner");
+                fn inner_fn() {}
+                snippet_end!("inner");
+            }
+            snippet_end!("outer");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("outer"));
+        assert!(result.contains_key("inner"));
+    }
+
+    #[test]
+    fn test_format_src_basic() {
+        let formatted = format_src("fn foo(){}");
+        assert!(formatted.is_some());
+        assert!(formatted.unwrap().contains("fn foo() {}"));
+    }
+
+    #[test]
+    fn test_format_src_with_doc_comment() {
+        let formatted = format_src("/// doc comment\n pub fn foo(){}");
+        assert!(formatted.is_some());
+        let result = formatted.unwrap();
+        assert!(result.contains("/// doc comment"));
+        assert!(result.contains("pub fn foo() {}"));
+    }
+
+    #[test]
+    fn test_unquote() {
+        use super::unquote;
+        assert_eq!(unquote(r#""hello""#), "hello");
+        assert_eq!(unquote("hello"), "hello");
+        assert_eq!(unquote(r#""test with spaces""#), "test with spaces");
+    }
+
+    #[test]
+    fn test_is_snippet_path() {
+        use super::is_snippet_path;
+        assert!(is_snippet_path("snippet"));
+        assert!(is_snippet_path("cargo_snippet_more :: snippet"));
+        assert!(!is_snippet_path("other"));
+        assert!(!is_snippet_path("snippet_test"));
+    }
 }

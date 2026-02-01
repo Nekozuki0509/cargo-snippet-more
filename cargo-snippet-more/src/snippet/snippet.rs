@@ -84,7 +84,7 @@ pub fn process_snippets(
 
                 for dep in &snip.attrs.uses {
                     deps.entry(name.clone())
-                        .or_insert_with(BTreeSet::new)
+                        .or_default()
                         .insert(dep.clone());
                 }
             }
@@ -138,4 +138,121 @@ pub fn process_snippets(
             .map(|(k, v)| (k, v.prefix + v.content.as_str()))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_snippet_attributes_default() {
+        let attrs = SnippetAttributes::default();
+        assert!(attrs.names.is_empty());
+        assert!(attrs.uses.is_empty());
+        assert!(attrs.not_library.is_empty());
+        assert!(attrs.prefix.is_empty());
+        assert!(!attrs.doc_hidden);
+    }
+
+    #[test]
+    fn test_lib_default() {
+        let lib = Lib::default();
+        assert!(lib.name.is_empty());
+        assert!(lib.path.is_empty());
+        assert!(lib.content.is_empty());
+    }
+
+    #[test]
+    fn test_process_snippets_empty() {
+        let result = process_snippets(vec![]);
+        assert!(result.1.is_empty());
+    }
+
+    #[test]
+    fn test_process_snippets_simple() {
+        let mut names = HashSet::new();
+        names.insert("test_snippet".to_string());
+        
+        let snippet = Snippet {
+            name: "test_fn".to_string(),
+            attrs: SnippetAttributes {
+                names: names.clone(),
+                uses: HashSet::new(),
+                not_library: HashSet::new(),
+                prefix: String::new(),
+                doc_hidden: false,
+            },
+            content: "fn test() {}".to_string(),
+        };
+
+        let (_, snippets) = process_snippets(vec![(vec![], vec![snippet])]);
+        assert!(snippets.contains_key("test_snippet"));
+    }
+
+    #[test]
+    fn test_process_snippets_with_dependencies() {
+        let mut base_names = HashSet::new();
+        base_names.insert("base".to_string());
+        
+        let base_snippet = Snippet {
+            name: "base_fn".to_string(),
+            attrs: SnippetAttributes {
+                names: base_names,
+                uses: HashSet::new(),
+                not_library: HashSet::new(),
+                prefix: String::new(),
+                doc_hidden: false,
+            },
+            content: "fn base() {}".to_string(),
+        };
+
+        let mut derived_names = HashSet::new();
+        derived_names.insert("derived".to_string());
+        let mut derived_uses = HashSet::new();
+        derived_uses.insert("base".to_string());
+        
+        let derived_snippet = Snippet {
+            name: "derived_fn".to_string(),
+            attrs: SnippetAttributes {
+                names: derived_names,
+                uses: derived_uses,
+                not_library: HashSet::new(),
+                prefix: String::new(),
+                doc_hidden: false,
+            },
+            content: "fn derived() {}".to_string(),
+        };
+
+        let (_, snippets) = process_snippets(vec![(vec![], vec![base_snippet, derived_snippet])]);
+        
+        assert!(snippets.contains_key("base"));
+        assert!(snippets.contains_key("derived"));
+        
+        let derived_content = &snippets["derived"];
+        assert!(derived_content.contains("base"));
+        assert!(derived_content.contains("derived"));
+    }
+
+    #[test]
+    fn test_process_snippets_with_prefix() {
+        let mut names = HashSet::new();
+        names.insert("with_prefix".to_string());
+        
+        let snippet = Snippet {
+            name: "test".to_string(),
+            attrs: SnippetAttributes {
+                names,
+                uses: HashSet::new(),
+                not_library: HashSet::new(),
+                prefix: "use std::io::*;\n".to_string(),
+                doc_hidden: false,
+            },
+            content: "fn test() {}".to_string(),
+        };
+
+        let (_, snippets) = process_snippets(vec![(vec![], vec![snippet])]);
+        let content = &snippets["with_prefix"];
+        assert!(content.contains("use std::io::*;"));
+        assert!(content.contains("fn test() {}"));
+    }
 }

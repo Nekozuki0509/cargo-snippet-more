@@ -31,13 +31,7 @@ use crate::snippet::snippet::process_snippets;
 
 /// Report error and continue.
 fn report_error<T>(result: Result<T, Error>) -> Option<T> {
-    match result {
-        Ok(x) => Some(x),
-        Err(e) => {
-            error!("{}", e);
-            None
-        }
-    }
+    result.inspect_err(|e| error!("{}", e)).ok()
 }
 
 fn main() {
@@ -107,12 +101,7 @@ fn snippet(config: SnippetConfig) {
         let result = if pos + 1 < components.len() {
             Ok(components[pos + 1..]
                 .iter()
-                .map(|x| {
-                    x.as_os_str()
-                        .to_string_lossy()
-                        .to_string()
-                        .replace(".rs", "")
-                })
+                .map(|x| x.as_os_str().to_string_lossy().replace(".rs", ""))
                 .collect::<Vec<_>>())
         } else {
             Err(Error::new(io::Error::new(
@@ -156,9 +145,9 @@ fn bundle(config: BundleConfig) -> Result<()> {
 
     let mut content = read_to_string(metas.bin.as_str())?;
     let bundle_content = get_should_bundle(&content, &data)?;
-    for (name, _) in data {
+    for (name, _) in &data {
         // Escape the module name to handle special regex characters, then build complete pattern
-        let escaped_name = regex::escape(&name);
+        let escaped_name = regex::escape(name);
         // Match "use <module>::..." or "use <module>;" patterns
         let pattern = format!(r"use\s+{}(?:::.*)?;", escaped_name);
         let re = Regex::new(&pattern)
