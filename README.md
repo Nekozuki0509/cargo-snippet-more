@@ -34,6 +34,8 @@ Install `cargo-snippet-more`:
 $ cargo install cargo-snippet-more --features="binaries"
 ```
 
+**Note:** The command is `cargo-snippet-more` (with hyphen), not `cargo snippet-more` (with space).
+
 ## Basic Usage
 
 Create a project for snippets:
@@ -130,22 +132,51 @@ fn documented() {}
 
 ### The `not_library` Attribute
 
-The `not_library` attribute prevents a snippet from being included in the library bundle. This is useful when you have:
-- Snippets with multiple names that should only appear as standalone snippets
-- Range-based snippets that shouldn't be mixed with regular library snippets
-- Testing snippets that don't need to be bundled
+The `not_library` attribute is crucial for understanding how bundling works. 
 
-Without `not_library`, snippets can be accidentally included in library bundles when using different names, causing duplication or unwanted mixing.
+**How Bundling Works:**
+Bundle functionality examines `use` statements in your binary to determine which snippets to include. It looks up the path in `libraries.toml` (e.g., `use mylib::UnionFind` looks for a library item named `UnionFind`).
+
+**When to Use `not_library`:**
+
+The `not_library` attribute should be applied to **any snippet where the function or struct name cannot be uniquely determined**. This happens when:
+
+1. **Multiple items in one snippet**: If you create a snippet named "math" that contains both `gcd` and `lcm` functions, you cannot write `use mylib::math` (there's no single item called "math"). This snippet must have `not_library`.
+
+2. **Snippets with multiple names**: When a snippet has multiple different names that don't correspond to actual function/struct names.
 
 ```rust
-// This snippet will NOT be included in library bundles
-#[snippet(name = "test_snippet", not_library)]
-fn test_function() {}
+// This should have not_library because "math" isn't a single function/struct
+#[snippet(name = "math", not_library)]
+fn gcd(a: u64, b: u64) -> u64 { /* ... */ }
 
-// This snippet WILL be included in library bundles
-#[snippet(name = "lib_snippet")]
-fn library_function() {}
+#[snippet(name = "math", not_library)]
+fn lcm(a: u64, b: u64) -> u64 { /* ... */ }
+
+// This can be a library because UnionFind is the actual struct name
+#[snippet(name = "UnionFind")]
+struct UnionFind { /* ... */ }
 ```
+
+**Range Snippets and Library:**
+
+Range snippets (using `snippet_start!`/`snippet_end!`) have library mode **OFF by default**. To make them available for bundling, use the `library` parameter with a name that **exactly matches** the function or struct name that will appear in `use` statements:
+
+```rust
+// Library mode OFF by default - cannot be bundled
+snippet_start!(name = "algorithms");
+fn helper1() {}
+fn helper2() {}
+snippet_end!("algorithms");
+
+// Library mode ON - can be bundled with "use mylib::UnionFind"
+snippet_start!(name = "union_find", library = "UnionFind");
+struct UnionFind { /* ... */ }
+impl UnionFind { /* ... */ }
+snippet_end!("union_find");
+```
+
+**Important:** The `library` parameter must exactly match what appears in `use` statements. If you write `use mylib::UnionFind`, the library name must be `"UnionFind"`.
 
 ## Range-Based Snippets
 
@@ -303,7 +334,7 @@ Bundle functionality allows you to combine library snippets into executable bina
 
 #### 1. Configure Cargo.toml
 
-Add metadata for cargo-compete integration:
+Add dependencies and metadata to your `Cargo.toml`:
 
 ```toml
 [package]
@@ -313,6 +344,8 @@ edition = "2021"
 
 [dependencies]
 cargo-snippet-more = "0.1"
+# Add your custom library (adjust path as needed)
+my-library = { path = "../my-library" }
 
 # Define your binaries
 [[bin]]
@@ -323,21 +356,43 @@ path = "src/bin/a.rs"
 name = "b"
 path = "src/bin/b.rs"
 
+# Metadata for cargo-snippet-more to find libraries.toml
+[[package.metadata.cargo-snippet-more.library-path]]
+libs = "../my-library/libraries.toml"
+
 # Metadata for bundling (compatible with cargo-compete)
 [package.metadata.cargo-compete.bin]
 a = { alias = "a", problem = "https://..." }
 b = { alias = "b", problem = "https://..." }
 ```
 
+**Important Configuration Details:**
+
+- `[[package.metadata.cargo-snippet-more.library-path]]`: This tells cargo-snippet-more where to find the `libraries.toml` file when bundling. The path is relative to the directory containing `Cargo.toml`.
+- You need to add your custom library to dependencies so it can be imported in your binary files.
+- The `cargo-compete` metadata is optional but recommended for cargo-compete integration.
+
 #### 2. Initialize for Bundling
 
 Run the init command to set up bundle configuration:
 
 ```bash
-$ cargo snippet-more init
+$ cargo-snippet-more init
 ```
 
-This creates `-more` variants of your binaries in the metadata, which will contain the bundled code.
+This command:
+- Creates `-more` variants of your binaries in the `cargo-compete` metadata
+- Sets up the necessary configuration for bundling
+- Automatically integrates with cargo-compete if you're using it
+
+**cargo-compete Integration:**
+
+If you're using [cargo-compete](https://github.com/qryxip/cargo-compete) for competitive programming:
+
+1. After running `cargo-compete new <contest>`, your `Cargo.toml` will have the `cargo-compete` metadata
+2. Run `cargo-snippet-more init` to create bundled versions of each binary
+3. The init command adds entries like `a-more`, `b-more` etc. to the metadata
+4. These bundled versions will be available for submission
 
 #### 3. Create Library Snippets
 
@@ -508,7 +563,17 @@ If you're migrating from cargo-snippet, all existing snippets continue to work. 
 
 ## Examples
 
-See the test suite in the repository for comprehensive examples of all features.
+### Real-World Example
+
+For a complete, real-world example of how to use cargo-snippet-more with all its features, see:
+**[Nekozuki-library](https://github.com/Nekozuki0509/Nekozuki-library)** - A competitive programming snippet library demonstrating:
+- Properly structured library snippets
+- Bundle configuration with cargo-compete
+- Range-based snippets with `library` parameter
+- Use of `not_library` attribute where appropriate
+- Complete workflow from snippet creation to bundling
+
+See also the test suite in this repository for additional examples of all features.
 
 ## License
 
