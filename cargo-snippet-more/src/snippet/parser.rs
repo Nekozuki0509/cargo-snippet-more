@@ -25,7 +25,7 @@ lazy_static! {
 }
 
 struct MacroVisitor {
-    file_content: String,
+    token_stream_source: String,
     snippets: Vec<Snippet>,
 }
 
@@ -80,7 +80,7 @@ impl<'a> Visit<'a> for MacroVisitor {
                 }
             };
             
-            let mut content = match re.find(&self.file_content) {
+            let mut content = match re.find(&self.token_stream_source) {
                 Some(m) => m.as_str().to_string(),
                 None => {
                     log::error!("Could not find snippet '{}' in source", snippet_name);
@@ -736,9 +736,11 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
     }
 
     res.extend({
-        let file_content = file.to_token_stream().to_string();
+        // Use token stream source instead of raw source.
+        // Comment-based placeholders are not supported; only p! macro placeholders work.
+        let token_stream_source = file.to_token_stream().to_string();
         let mut visitor = MacroVisitor {
-            file_content,
+            token_stream_source,
             snippets: vec![],
         };
         visitor.visit_file(&file);
