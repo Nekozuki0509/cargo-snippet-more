@@ -447,19 +447,17 @@ This creates `libraries.toml` containing all library snippets.
 
 #### 5. Use Libraries in Binary
 
-In your binary (e.g., `src/bin/a.rs`), import and use the library snippets you need:
+In your binary (e.g., `src/bin/a.rs`), you can either:
+
+**Option A: Bundle custom library code** (recommended for most cases):
 
 ```rust
-// Import library modules from your external library
+// Import from your custom library
 use my_library::gcd;
-use my_library::math::UnionFind;
-
-// Mark which snippets are expanded (already included from the library)
-cargo_snippet_more::expanded!("gcd");
-cargo_snippet_more::expanded!("UnionFind");
+use my_library::UnionFind;
 
 fn main() {
-    // Use the imported functions/structs
+    // These will be bundled into the final file
     let result = gcd(48, 18);
     println!("GCD: {}", result);
     
@@ -468,10 +466,27 @@ fn main() {
 }
 ```
 
+**Option B: Use platform-provided libraries** (e.g., on AtCoder):
+
+```rust
+// Import from libraries available on the contest platform (e.g., proconio on AtCoder)
+use proconio::input;
+
+// Mark platform libraries as expanded (they're already available on the server)
+cargo_snippet_more::expanded!("proconio");
+
+fn main() {
+    input! {
+        n: usize,
+    }
+    println!("{}", n);
+}
+```
+
 **Important Notes:**
-- The `use` statements import from your external library crate (defined in dependencies)
-- The `expanded!()` macro tells the bundler these snippets are already included and shouldn't be duplicated
-- The names in `expanded!()` must match the library names defined in your snippets
+- **For custom libraries**: Do NOT use `expanded!()` - the code will be automatically bundled
+- **For platform libraries**: Use `expanded!()` only for libraries that exist on the contest server (like proconio, superslice on AtCoder)
+- When you run `cargo-snippet-more bundle`, your custom library code will be inlined into the output file
 
 #### 6. Bundle the Binary
 
@@ -512,8 +527,8 @@ cargo-snippet-more bundle --bin a
 ```rust
 use cargo_snippet_more::{snippet, snippet_start, snippet_end, p};
 
-// Range snippet with placeholders for library
-snippet_start!(name = "interactive_search", library = "algorithms", include = "binary_search");
+// Range snippet with placeholders (no library parameter - won't be bundled)
+snippet_start!(name = "interactive_search", include = "binary_search");
 
 fn find_element<T: Ord>(arr: &[T]) -> Option<T> {
     let target = p!(1, &arr[0]);
