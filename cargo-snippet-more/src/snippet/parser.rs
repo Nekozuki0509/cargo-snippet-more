@@ -761,3 +761,133 @@ pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
         .map(|file| get_snippet_from_file(file))
         .context("Failed to parse Rust source file")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_snippet, unescape};
+    use crate::snippet::snippet::process_snippets;
+    use crate::snippet::writer::format_src;
+    use std::collections::BTreeMap;
+
+    fn snippets(src: &str) -> BTreeMap<String, String> {
+        let snippets = parse_snippet(src).unwrap();
+        process_snippets(vec![(vec![], snippets)]).1
+    }
+
+    #[test]
+    fn test_unescape() {
+        assert_eq!(unescape(r#"hello"#), "hello");
+        assert_eq!(unescape(r#"hello\nworld"#), "hello\nworld");
+        assert_eq!(unescape(r#"hello\tworld"#), "hello\tworld");
+        assert_eq!(unescape(r#"hello\rworld"#), "hello\rworld");
+        assert_eq!(unescape(r#"hello\"world"#), "hello\"world");
+        assert_eq!(unescape(r#"hello\\world"#), "hello\\world");
+        assert_eq!(unescape(r#"\u{1F600}"#), "😀");
+        assert_eq!(unescape(r#"\u{3042}"#), "あ");
+    }
+
+    #[test]
+    fn test_parse_simple_snippet() {
+        let src = r#"
+            #[snippet]
+            fn foo() {
+                println!("hello");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("foo"));
+    }
+
+    #[test]
+    fn test_parse_snippet_with_name() {
+        let src = r#"
+            #[snippet(name = "my_snippet")]
+            fn foo() {
+                println!("hello");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("my_snippet"));
+    }
+
+    #[test]
+    fn test_parse_snippet_with_include() {
+        let src = r#"
+            #[snippet(name = "base")]
+            fn base_fn() {
+                println!("base");
+            }
+
+            #[snippet(name = "derived", include = "base")]
+            fn derived_fn() {
+                println!("derived");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("base"));
+        assert!(result.contains_key("derived"));
+        let derived = &result["derived"];
+        assert!(derived.contains("base_fn"));
+        assert!(derived.contains("derived_fn"));
+    }
+
+    #[test]
+    fn test_parse_snippet_with_prefix() {
+        let src = r#"
+            #[snippet(name = "with_prefix", prefix = "use std::io::*;")]
+            fn foo() {
+                println!("hello");
+            }
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("with_prefix"));
+        let content = &result["with_prefix"];
+        assert!(content.contains("use std::io::*;"));
+    }
+
+    #[test]
+    fn test_parse_snippet_macro_style() {
+        let src = r#"
+            snippet_start!("my_macro_snippet");
+            fn bar() {
+                println!("bar");
+            }
+            snippet_end!("my_macro_snippet");
+        "#;
+        let result = snippets(src);
+        assert!(result.contains_key("my_macro_snippet"));
+    }
+
+    #[test]
+    fn test_format_src_basic() {
+        let formatted = format_src("fn foo(){}");
+        assert!(formatted.is_some());
+        assert!(formatted.unwrap().contains("fn foo() {}"));
+    }
+
+    #[test]
+    fn test_format_src_with_doc_comment() {
+        let formatted = format_src("/// doc comment\n pub fn foo(){}");
+        assert!(formatted.is_some());
+        let result = formatted.unwrap();
+        assert!(result.contains("/// doc comment"));
+        assert!(result.contains("pub fn foo() {}"));
+    }
+
+    #[test]
+    fn test_unquote() {
+        use super::unquote;
+        assert_eq!(unquote(r#""hello""#), "hello");
+        assert_eq!(unquote("hello"), "hello");
+        assert_eq!(unquote(r#""test with spaces""#), "test with spaces");
+    }
+
+    #[test]
+    fn test_is_snippet_path() {
+        use super::is_snippet_path;
+        assert!(is_snippet_path("snippet"));
+        assert!(is_snippet_path("cargo_snippet_more :: snippet"));
+        assert!(!is_snippet_path("other"));
+        assert!(!is_snippet_path("snippet_test"));
+    }
+}

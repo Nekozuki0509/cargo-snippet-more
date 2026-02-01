@@ -67,7 +67,7 @@ impl<'ast> Visit<'ast> for Visitor {
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
 
         if (path == "cargo_snippet_more::expanded" || path == "expanded")
-            && let Some(TokenTree::Literal(lit)) = mac.tokens.iter().next()
+            && let Some(TokenTree::Literal(lit)) = mac.tokens.clone().into_iter().next()
         {
             let value = lit.to_string();
             if value.starts_with('"') {
