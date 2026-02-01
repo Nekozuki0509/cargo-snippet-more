@@ -11,7 +11,7 @@ impl<'a> BundleConfig<'a> {
             target: matches
                 .subcommand_matches("bundle")
                 .and_then(|m| m.value_of("bin"))
-                .unwrap(),
+                .expect("Bundle subcommand requires --bin argument"),
         }
     }
 }

@@ -4,6 +4,7 @@ use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::ToTokens;
 use regex::{Captures, Regex};
 use syn::visit::Visit;
+use syn::visit_mut::VisitMut;
 use syn::{Attribute, File, Item, Macro, Meta, MetaList, NestedMeta, parse_file};
 
 use std::collections::HashSet;
@@ -11,28 +12,92 @@ use std::{char, u32};
 
 use crate::snippet::snippet::{Snippet, SnippetAttributes};
 
-struct Visitor<'a> {
+lazy_static! {
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref SNIPPET_ATTR_RE: Regex = Regex::new(r#"# \[(cargo_snippet_more :: )?snippet.+?\]"#)
+        .expect("Failed to compile snippet attribute removal regex");
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref ESCAPED_UNICODE: Regex = Regex::new(r"\\u\{([0-9a-fA-F]{1,6})\}") 
+        .expect("Failed to compile unicode escape regex");
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref DOC_RE: Regex = Regex::new(r#"^\[doc = "(?s)(.*)"\]$"#)
+        .expect("Failed to compile doc comment regex");
+}
+
+struct MacroVisitor<'a> {
     source: &'a str,
     snippets: Vec<Snippet>,
 }
 
-impl<'a> Visit<'a> for Visitor<'a> {
+struct ItemVisitor {
+    snippets: Vec<Snippet>,
+}
+
+struct RemoveSnippetAttrVisitor;
+
+impl VisitMut for RemoveSnippetAttrVisitor {
+    fn visit_item_mut(&mut self, item: &mut Item) {
+        if let Some(attrs) = get_attrs_mut(item) {
+            attrs.retain(|attr| {
+                attr.parse_meta()
+                    .map(|m| !is_snippet_path(m.path().to_token_stream().to_string().as_str()))
+                    .unwrap_or(true)
+            });
+        }
+        syn::visit_mut::visit_item_mut(self, item);
+    }
+}
+
+impl<'a> Visit<'a> for MacroVisitor<'a> {
     fn visit_macro(&mut self, mac: &'a Macro) {
+        
         let path = mac.path.to_token_stream().to_string().replace(' ', "");
 
         if (path == "snippet_start" || path == "cargo_snippet_more::snippet_start") 
             && let Some((name, params)) = parse_macro_params(mac) 
         {
-            let re = Regex::new(&format!(r#"(?s)(cargo_snippet_more\s*::\s*)?snippet_start\s*!\s*\(("{0}"|name\s*=\s*"{0}".*)\)\s*;.+(cargo_snippet_more\s*::\s*)?snippet_end\s*!\s*\("{0}"\)\s*;"#, params.names.iter().next().unwrap())).unwrap();
-            let mut content = re.find(self.source).unwrap().as_str().to_string();
 
-            let re = Regex::new(r#"#\s*\[(cargo_snippet_more\s*::\s*)?snippet.+?\]"#).unwrap();
-            content = re.replace_all(&content, "").to_string();
+            let snippet_name = match params.names.iter().next() {
+                Some(name) => name,
+                None => {
+                    log::error!("Snippet parameters have no names");
+                    return;
+                }
+            };
+            
+            // Escape the snippet name to handle special regex characters
+            let escaped_name = regex::escape(snippet_name);
+            let pattern = format!(
+                r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#,
+                escaped_name
+            );
+            
+            let re = match Regex::new(&pattern) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::error!("Failed to create regex for snippet '{}': {}", snippet_name, e);
+                    return;
+                }
+            };
+            
+            let mut content = match re.find(self.source) {
+                Some(m) => m.as_str().to_string(),
+                None => {
+                    log::error!("Could not find snippet '{}' in source", snippet_name);
+                    return;
+                }
+            };
 
-            // Extract comment placeholder mappings before parsing
+            content = SNIPPET_ATTR_RE.replace_all(&content, "").to_string();
+
             let comment_mappings = extract_comment_placeholders(&content);
-
-            let file = syn::parse_str::<TokenStream>(&content).unwrap();
+            let file = match syn::parse_str::<TokenStream>(&content) {
+                Ok(f) => f,
+                Err(e) => {
+                    log::error!("Failed to parse snippet '{}' as TokenStream: {}", snippet_name, e);
+                    return;
+                }
+            };
 
             let mut content = stringify_tokens(file, params.doc_hidden);
             
@@ -47,6 +112,15 @@ impl<'a> Visit<'a> for Visitor<'a> {
         }
 
         syn::visit::visit_macro(self, mac);
+    }
+}
+
+impl<'a> Visit<'a> for ItemVisitor {
+    fn visit_item(&mut self, item: &'a Item) {
+        if let Some(snippet) = get_snippet_from_item(item.clone()) {
+            self.snippets.push(snippet);
+        }
+        syn::visit::visit_item(self, item);
     }
 }
 
@@ -171,25 +245,22 @@ fn get_attrs(item: &Item) -> Option<&Vec<Attribute>> {
     )
 }
 
-macro_rules! remove_snippet_attr_impl {
+macro_rules! get_attrs_mut_impl {
     ($arg: expr, $($v: path), *) => {
         {
             match $arg {
                 $(
-                    &mut $v(ref mut x) => {
-                        x.attrs.retain(|attr| {
-                            attr.parse_meta().map(|m| !is_snippet_path(m.path().to_token_stream().to_string().as_str())).unwrap_or(true)
-                        });
-                    },
+                    &mut $v(ref mut x) => Some(&mut x.attrs),
                 )*
-                _ => ()
+                _ => None
             }
         }
     }
 }
 
-fn remove_snippet_attr(item: &mut Item) {
-    remove_snippet_attr_impl!(
+fn get_attrs_mut(item: &mut Item) -> Option<&mut Vec<Attribute>> {
+    // All Item variants except Item::Verbatim
+    get_attrs_mut_impl!(
         item,
         Item::ExternCrate,
         Item::Use,
@@ -206,13 +277,12 @@ fn remove_snippet_attr(item: &mut Item) {
         Item::Impl,
         Item::Macro,
         Item::Macro2
-    );
+    )
+}
 
-    if let Item::Mod(item_mod) = item {
-        if let Some(&mut (_, ref mut items)) = item_mod.content.as_mut() {
-            items.iter_mut().for_each(|item| remove_snippet_attr(item));
-        }
-    }
+fn remove_snippet_attr(item: &mut Item) {
+    let mut visitor = RemoveSnippetAttrVisitor;
+    visitor.visit_item_mut(item);
 }
 
 pub fn unquote(s: &str) -> String {
@@ -344,7 +414,8 @@ fn get_simple_attr(attr: &Attribute, key: &str) -> Vec<String> {
                                 let value = if let syn::Lit::Str(s) = &nv.lit.clone() {
                                     s.value()
                                 } else {
-                                    panic!("attribute must be string");
+                                    log::error!("Snippet attribute '{}' must be a string literal", key);
+                                    return None;
                                 };
                                 Some(value)
                             } else {
@@ -470,9 +541,6 @@ fn next_token_is_doc(token: &TokenTree) -> bool {
 }
 
 fn unescape(s: impl Into<String>) -> String {
-    lazy_static! {
-        static ref ESCAPED_UNICODE: Regex = Regex::new(r"\\u\{([0-9a-fA-F]{1,6})\}").unwrap();
-    }
     let s = s.into();
     let unicode_unescaped: Vec<char> = ESCAPED_UNICODE
         .replace_all(&s, |caps: &Captures| {
@@ -520,9 +588,6 @@ fn unescape(s: impl Into<String>) -> String {
 }
 
 fn format_doc_comment(doc_tt: TokenTree, is_inner: bool, doc_hidden: bool) -> Option<String> {
-    lazy_static! {
-        static ref DOC_RE: Regex = Regex::new(r#"^\[doc = "(?s)(.*)"\]$"#).unwrap();
-    }
     if doc_hidden {
         return None;
     }
@@ -860,8 +925,8 @@ fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
     }
 
     res.extend({
-        let mut visitor = Visitor {
-            source,  // Use original source with comments
+        let mut visitor = MacroVisitor {
+            source: &file.to_token_stream().to_string(),
             snippets: vec![],
         };
         visitor.visit_file(&file);
@@ -869,15 +934,20 @@ fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
         visitor.snippets
     });
 
-    res.extend(
-        file.items
-            .into_iter()
-            .flat_map(get_snippet_from_item_recursive),
-    );
+    res.extend({
+        let mut visitor = ItemVisitor {
+            snippets: vec![],
+        };
+        visitor.visit_file(&file);
+
+        visitor.snippets
+    });
 
     res
 }
 
 pub fn parse_snippet(src: &str) -> Result<Vec<Snippet>, anyhow::Error> {
-    parse_file(src).map(|file| get_snippet_from_file(file, src)).context("")
+    parse_file(src)
+        .map(get_snippet_from_file)
+        .context("Failed to parse Rust source file")
 }
