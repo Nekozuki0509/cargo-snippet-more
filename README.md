@@ -90,13 +90,13 @@ $ cargo test
 Extract snippets:
 
 ```bash
-$ cargo snippet
+$ cargo-snippet-more snippet
 ```
 
 Specify output format (neosnippet, vscode, or ultisnips):
 
 ```bash
-$ cargo snippet -t vscode
+$ cargo-snippet-more snippet -t vscode
 ```
 
 ## Snippet Attributes
@@ -240,20 +240,31 @@ snippet_end!("hidden_docs");
 
 ### Setting Library Name for Range Snippets
 
-To include range snippets in library bundles, use the `library` parameter:
+To include range snippets in library bundles, use the `library` parameter. **Important**: The `library` parameter is only appropriate when the range snippet contains a **single struct or function** that will be imported. The library name must **exactly match** the name used in `use` statements.
 
 ```rust
-snippet_start!(name = "my_snippet", library = "my_library");
+// Correct: Single struct with library parameter matching the struct name
+snippet_start!(name = "union_find", library = "UnionFind");
 
-fn helper_function() {}
-fn main_function() {}
+struct UnionFind {
+    parent: Vec<usize>,
+}
 
-snippet_end!("my_snippet");
+impl UnionFind {
+    fn new(n: usize) -> Self {
+        UnionFind { parent: (0..n).collect() }
+    }
+}
+
+snippet_end!("union_find");
+
+// This can be used with: use my_library::UnionFind;
 ```
 
-This creates a snippet named "my_snippet" that will be bundled under the library name "my_library".
-
-Without the `library` parameter, the snippet is automatically marked as `not_library` and won't be included in bundles.
+**Key Points:**
+- Use `library` parameter **only** when the snippet defines a single struct or function
+- The `library` name must exactly match what appears in `use` statements (e.g., `library = "UnionFind"` for `use lib::UnionFind`)
+- Without the `library` parameter, range snippets are automatically marked as `not_library` and won't be included in bundles
 
 ## Interactive Placeholders
 
@@ -360,17 +371,14 @@ path = "src/bin/b.rs"
 [[package.metadata.cargo-snippet-more.library-path]]
 libs = "../my-library/libraries.toml"
 
-# Metadata for bundling (compatible with cargo-compete)
-[package.metadata.cargo-compete.bin]
-a = { alias = "a", problem = "https://..." }
-b = { alias = "b", problem = "https://..." }
+# Note: cargo-compete metadata will be automatically added by `cargo-snippet-more init`
 ```
 
 **Important Configuration Details:**
 
 - `[[package.metadata.cargo-snippet-more.library-path]]`: This tells cargo-snippet-more where to find the `libraries.toml` file when bundling. The path is relative to the directory containing `Cargo.toml`.
 - You need to add your custom library to dependencies so it can be imported in your binary files.
-- The `cargo-compete` metadata is optional but recommended for cargo-compete integration.
+- The `cargo-compete` metadata will be automatically created when you run `cargo-snippet-more init` - you don't need to add it manually.
 
 #### 2. Initialize for Bundling
 
@@ -432,36 +440,45 @@ snippet_end!("math_utils");
 Generate the library metadata:
 
 ```bash
-$ cargo snippet
+$ cargo-snippet-more snippet
 ```
 
 This creates `libraries.toml` containing all library snippets.
 
 #### 5. Use Libraries in Binary
 
-In your binary (e.g., `src/bin/a.rs`):
+In your binary (e.g., `src/bin/a.rs`), import and use the library snippets you need:
 
 ```rust
-// Import library modules
-use my_contest_project::gcd;
-use my_contest_project::math::mod_pow;
+// Import library modules from your external library
+use my_library::gcd;
+use my_library::math::UnionFind;
 
-// Mark which snippets are expanded (included)
+// Mark which snippets are expanded (already included from the library)
 cargo_snippet_more::expanded!("gcd");
-cargo_snippet_more::expanded!("math_utils");
+cargo_snippet_more::expanded!("UnionFind");
 
 fn main() {
+    // Use the imported functions/structs
     let result = gcd(48, 18);
-    println!("{}", result);
+    println!("GCD: {}", result);
+    
+    let uf = UnionFind::new(10);
+    // ... use UnionFind
 }
 ```
+
+**Important Notes:**
+- The `use` statements import from your external library crate (defined in dependencies)
+- The `expanded!()` macro tells the bundler these snippets are already included and shouldn't be duplicated
+- The names in `expanded!()` must match the library names defined in your snippets
 
 #### 6. Bundle the Binary
 
 Create the bundled version:
 
 ```bash
-$ cargo snippet-more bundle --bin a
+$ cargo-snippet-more bundle --bin a
 ```
 
 This generates `src/cargo-snippet-more/a.rs` with all required library code inlined. The `use` statements are commented out and the library code is appended.
@@ -476,13 +493,13 @@ cd my-contest
 # 2. Write library snippets in src/lib.rs
 # 3. Write binary in src/bin/a.rs with use statements
 # 4. Initialize bundling
-cargo snippet-more init
+cargo-snippet-more init
 
 # 5. Extract snippets to libraries.toml
-cargo snippet
+cargo-snippet-more snippet
 
 # 6. Bundle specific binary
-cargo snippet-more bundle --bin a
+cargo-snippet-more bundle --bin a
 
 # 7. The bundled file is at src/cargo-snippet-more/a.rs
 # Submit this file to the contest platform
