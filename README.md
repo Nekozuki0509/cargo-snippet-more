@@ -563,15 +563,21 @@ If you're migrating from cargo-snippet, all existing snippets continue to work. 
 
 ## Examples
 
-### Real-World Example
+### Real-World Examples
 
-For a complete, real-world example of how to use cargo-snippet-more with all its features, see:
+**Snippet Library Example:**
 **[Nekozuki-library](https://github.com/Nekozuki0509/Nekozuki-library)** - A competitive programming snippet library demonstrating:
 - Properly structured library snippets
-- Bundle configuration with cargo-compete
 - Range-based snippets with `library` parameter
 - Use of `not_library` attribute where appropriate
-- Complete workflow from snippet creation to bundling
+- Complete library organization for competitive programming
+
+**cargo-compete Integration Example:**
+**[atcoder_rust](https://github.com/Nekozuki0509/atcoder_rust)** - A complete cargo-compete project showing:
+- Full Cargo.toml configuration with metadata
+- Integration with cargo-snippet-more for bundling
+- How to use library snippets in contest binaries
+- Complete workflow from contest setup to submission
 
 See also the test suite in this repository for additional examples of all features.
 
