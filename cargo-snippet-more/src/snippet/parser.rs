@@ -154,9 +154,12 @@ fn parse_macro_params(mac: &Macro) -> Option<(String, SnippetAttributes)> {
                                 attrs.names.insert(value);
                             }
                             "include" => {
-                                for u in value.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-                                    attrs.uses.insert(u.to_string());
-                                }
+                                attrs.uses.extend(
+                                    value.split(',')
+                                        .map(str::trim)
+                                        .filter(|s| !s.is_empty())
+                                        .map(String::from)
+                                );
                             }
                             "prefix" => {
                                 if !attrs.prefix.is_empty() {
@@ -175,7 +178,7 @@ fn parse_macro_params(mac: &Macro) -> Option<(String, SnippetAttributes)> {
                     continue;
                 } 
 
-                if key.as_str() == "doc_hidden" {
+                if key == "doc_hidden" {
                     attrs.doc_hidden = true;
                 }
 
@@ -370,9 +373,9 @@ fn get_snippet_uses(attr: &Attribute) -> Option<Vec<String>> {
                             let uses = unquote(&nv.lit.to_token_stream().to_string());
                             Some(
                                 uses.split(',')
-                                    .map(|s| s.trim())
+                                    .map(str::trim)
                                     .filter(|s| !s.is_empty())
-                                    .map(|s| s.to_string())
+                                    .map(String::from)
                                     .collect(),
                             )
                         } else {
