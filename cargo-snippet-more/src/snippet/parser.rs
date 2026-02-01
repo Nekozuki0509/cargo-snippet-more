@@ -68,7 +68,7 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
             // Escape the snippet name to handle special regex characters
             let escaped_name = regex::escape(snippet_name);
             let pattern = format!(
-                r#"(?s)(cargo_snippet_more :: )?snippet_start ! \(("{0}"|name = "{0}".*)\) ;.+(cargo_snippet_more :: )?snippet_end ! \("{0}"\) ;"#,
+                r#"(?s)(cargo_snippet_more\s*::\s*)?snippet_start\s*!\s*\(("{0}"|name\s*=\s*"{0}".*)\)\s*;.+(cargo_snippet_more\s*::\s*)?snippet_end\s*!\s*\("{0}"\)\s*;"#,
                 escaped_name
             );
             
@@ -90,7 +90,20 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
 
             content = SNIPPET_ATTR_RE.replace_all(&content, "").to_string();
 
+            log::debug!("Content to extract placeholders from (first 200 chars): '{}'", 
+                if content.len() > 200 { &content[..200] } else { &content });
+
             let comment_mappings = extract_comment_placeholders(&content);
+            
+            // Debug logging
+            if !comment_mappings.is_empty() {
+                log::debug!("Found {} comment placeholder mappings for snippet '{}'", 
+                    comment_mappings.len(), snippet_name);
+                for (pattern, replacement) in &comment_mappings {
+                    log::debug!("  Pattern: '{}' -> Replacement: '{}'", pattern, replacement);
+                }
+            }
+            
             let file = match syn::parse_str::<TokenStream>(&content) {
                 Ok(f) => f,
                 Err(e) => {
@@ -101,8 +114,12 @@ impl<'a> Visit<'a> for MacroVisitor<'a> {
 
             let mut content = stringify_tokens(file, params.doc_hidden);
             
+            log::debug!("Stringified content before applying placeholders: '{}'", content);
+            
             // Apply comment placeholder replacements after stringification
             content = apply_comment_placeholders(content, &comment_mappings);
+            
+            log::debug!("Content after applying placeholders: '{}'", content);
 
             self.snippets.push(Snippet {
                 name: name,
@@ -856,6 +873,7 @@ fn extract_comment_placeholders(content: &str) -> Vec<(String, String)> {
             cap.get(0).map(|m| {
                 let num = cap.get(1).unwrap().as_str().to_string();
                 let choices = cap.get(2).map(|c| c.as_str().to_string());
+                log::debug!("Found ps! marker: num={}, start={}, end={}, choices={:?}", num, m.start(), m.end(), choices);
                 (num, m.start(), m.end(), choices)
             })
         })
@@ -867,10 +885,13 @@ fn extract_comment_placeholders(content: &str) -> Vec<(String, String)> {
         .filter_map(|cap| {
             cap.get(0).map(|m| {
                 let num = cap.get(1).unwrap().as_str().to_string();
+                log::debug!("Found pe! marker: num={}, start={}, end={}", num, m.start(), m.end());
                 (num, m.start(), m.end())
             })
         })
         .collect();
+    
+    log::debug!("Total ps! markers found: {}, pe! markers found: {}", ps_markers.len(), pe_markers.len());
     
     // Match ps!/pe! pairs with the same number using regex to extract content
     for (ps_num, ps_start, ps_end, choices) in ps_markers.iter() {
@@ -1019,7 +1040,7 @@ fn get_snippet_from_file(file: File, source: &str) -> Vec<Snippet> {
 
     res.extend({
         let mut visitor = MacroVisitor {
-            source: &file.to_token_stream().to_string(),
+            source,  // Use original source with comments preserved
             snippets: vec![],
         };
         visitor.visit_file(&file);
