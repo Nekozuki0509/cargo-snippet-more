@@ -51,11 +51,21 @@ pub fn format_src(src: &str) -> Option<String> {
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
         .stderr(process::Stdio::piped())
-        .spawn()
-        .expect("Failed to spawn rustfmt process");
+        .spawn();
+    
+    let mut command = match command {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            log::error!("Failed to spawn rustfmt process: {}", e);
+            return None;
+        }
+    };
     {
         let mut stdin = command.stdin.take()?;
-        write!(stdin, "{}", src).unwrap();
+        if let Err(e) = write!(stdin, "{}", src) {
+            log::error!("Failed to write to rustfmt stdin: {}", e);
+            return None;
+        }
     }
     let out = command.wait_with_output().ok()?;
 

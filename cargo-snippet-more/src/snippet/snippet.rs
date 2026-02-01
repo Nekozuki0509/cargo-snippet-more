@@ -1,8 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::bundle::data::Data;
+
+lazy_static! {
+    // This regex pattern is a compile-time constant and known to be valid
+    static ref SNIPPET_MARKER_RE: Regex = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;")
+        .expect("Failed to compile snippet marker regex");
+}
 
 #[derive(Debug, Default)]
 pub struct SnippetAttributes {
@@ -48,8 +55,7 @@ pub fn process_snippets(
     for (path, snip_vec) in snips {
         for snip in snip_vec {
             let mut content = snip.content;
-            let re = Regex::new(r"(cargo_snippet_more :: )?snippet_(start|end) ! .+?;").unwrap();
-            content = re.replace_all(&content, "").to_string();
+            content = SNIPPET_MARKER_RE.replace_all(&content, "").to_string();
 
             for name in &snip.attrs.names {
                 if !snip.attrs.not_library.contains(name) {
