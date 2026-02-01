@@ -16,7 +16,7 @@ path = "src/main.rs"
 required-features = ["binaries"]
 
 [dependencies]
-syn = { version = "1", features = ["full", "parsing", "extra-traits", "printing", "visit"], optional = true }
+syn = { version = "1", features = ["full", "parsing", "extra-traits", "printing", "visit", "visit-mut"], optional = true }
 quote = { version = "1", optional = true }
 proc-macro2 = { version = "1", optional = true }
 rustfmt-nightly = { version = "1", optional = true }
