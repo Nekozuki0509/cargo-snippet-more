@@ -1,0 +1,3 @@
+[workspace]
+shared-version = true
+pre-push-hook = false

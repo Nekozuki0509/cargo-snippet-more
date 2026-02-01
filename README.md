@@ -5,6 +5,7 @@
 A powerful snippet extractor for competitive programmers, forked from [cargo-snippet](https://github.com/hatoo/cargo-snippet) with enhanced features.
 
 **New Features in cargo-snippet-more:**
+
 - 🎯 **Bundle functionality** - Bundle library snippets into executable binaries for competitive programming platforms
 - 📦 **Range-based snippets** with `snippet_start!`/`snippet_end!` macros
 - ✨ **Interactive placeholders** with the `p!()` macro for VSCode, Ultisnips, and Neosnippet
@@ -25,13 +26,13 @@ A powerful snippet extractor for competitive programmers, forked from [cargo-sni
 You need to install `rustfmt` to run `cargo-snippet-more`.
 
 ```bash
-$ rustup component add rustfmt
+rustup component add rustfmt
 ```
 
 Install `cargo-snippet-more`:
 
 ```bash
-$ cargo install cargo-snippet-more --features="binaries"
+cargo install cargo-snippet-more --features="binaries"
 ```
 
 **Note:** The command is `cargo-snippet-more` (with hyphen), not `cargo snippet-more` (with space).
@@ -41,14 +42,14 @@ $ cargo install cargo-snippet-more --features="binaries"
 Create a project for snippets:
 
 ```bash
-$ cargo new --lib mysnippet
+cargo new --lib mysnippet
 ```
 
 Add dependency to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cargo-snippet-more = "0.1"
+cargo-snippet-more = "0.2"
 ```
 
 Write snippet code with tests:
@@ -57,7 +58,7 @@ Write snippet code with tests:
 use cargo_snippet_more::snippet;
 
 // Annotate snippet name
-#[snippet("mymath")]
+#[snippet(name = "mymath", not_library)]
 #[snippet("gcd")]
 fn gcd(a: u64, b: u64) -> u64 {
     if b == 0 {
@@ -68,7 +69,7 @@ fn gcd(a: u64, b: u64) -> u64 {
 }
 
 // Also works
-#[snippet(name = "mymath")]
+#[snippet(name = "mymath", not_library)]
 // Equivalent to #[snippet("lcm")]
 #[snippet]
 fn lcm(a: u64, b: u64) -> u64 {
@@ -84,19 +85,19 @@ fn test_gcd() {
 Test your code:
 
 ```bash
-$ cargo test
+cargo test
 ```
 
 Extract snippets:
 
 ```bash
-$ cargo-snippet-more snippet
+cargo-snippet-more snippet
 ```
 
 Specify output format (neosnippet, vscode, or ultisnips):
 
 ```bash
-$ cargo-snippet-more snippet -t vscode
+cargo-snippet-more snippet -t vscode
 ```
 
 ## Snippet Attributes
@@ -132,7 +133,7 @@ fn documented() {}
 
 ### The `not_library` Attribute
 
-The `not_library` attribute is crucial for understanding how bundling works. 
+The `not_library` attribute is crucial for understanding how bundling works.
 
 **How Bundling Works:**
 Bundle functionality examines `use` statements in your binary to determine which snippets to include. It looks up the path in `libraries.toml` (e.g., `use mylib::UnionFind` looks for a library item named `UnionFind`).
@@ -262,6 +263,7 @@ snippet_end!("union_find");
 ```
 
 **Key Points:**
+
 - Use `library` parameter **only** when the snippet defines a single struct or function
 - The `library` name must exactly match what appears in `use` statements (e.g., `library = "UnionFind"` for `use lib::UnionFind`)
 - Without the `library` parameter, range snippets are automatically marked as `not_library` and won't be included in bundles
@@ -313,6 +315,7 @@ fn binary_search<T: Ord>(arr: &[T], target: &T) -> Option<usize> {
 ```
 
 When this snippet is inserted in VSCode:
+
 - `${1:mut low}` is the first placeholder with default "mut low"
 - `${2:mut high}` is the second placeholder
 - `${3:mid}` is the third placeholder
@@ -354,7 +357,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cargo-snippet-more = "0.1"
+cargo-snippet-more = "0.2"
 # Add your custom library (adjust path as needed)
 my-library = { path = "../my-library" }
 
@@ -385,10 +388,11 @@ libs = "../my-library/libraries.toml"
 Run the init command to set up bundle configuration:
 
 ```bash
-$ cargo-snippet-more init
+cargo-snippet-more init
 ```
 
 This command:
+
 - Creates `-more` variants of your binaries in the `cargo-compete` metadata
 - Sets up the necessary configuration for bundling
 - Automatically integrates with cargo-compete if you're using it
@@ -422,7 +426,7 @@ fn lcm(a: u64, b: u64) -> u64 {
 }
 
 // Range snippet for library
-snippet_start!(name = "math_utils", library = "math");
+snippet_start!(name = "math_utils");
 
 fn mod_pow(base: u64, exp: u64, modulo: u64) -> u64 {
     // implementation
@@ -440,7 +444,7 @@ snippet_end!("math_utils");
 Generate the library metadata:
 
 ```bash
-$ cargo-snippet-more snippet
+cargo-snippet-more snippet
 ```
 
 This creates `libraries.toml` containing all library snippets.
@@ -466,39 +470,12 @@ fn main() {
 }
 ```
 
-**Option B: Use platform-provided libraries** (e.g., on AtCoder):
-
-```rust
-// Import from libraries available on the contest platform (e.g., proconio on AtCoder)
-use proconio::input;
-
-// Mark platform libraries as expanded (they're already available on the server)
-cargo_snippet_more::expanded!("proconio");
-
-fn main() {
-    input! {
-        n: usize,
-    }
-    println!("{}", n);
-}
-```
-
-**Important Notes:**
-- **For custom libraries**: Do NOT use `expanded!()` - the code will be automatically bundled
-- **For platform libraries**: Use `expanded!()` only for libraries that exist on the contest server (like proconio, superslice on AtCoder)
-- When you run `cargo-snippet-more bundle`, your custom library code will be inlined into the output file
-
-### Advanced `expanded!()` Techniques
-
-The `expanded!()` macro has powerful use cases beyond just marking platform libraries:
-
-**Use Case 1: Editing a Dependency While Keeping Dependents Unchanged**
+**Option B: Editing a Dependency While Keeping Dependents Unchanged**
 
 When you have library functions that depend on each other and want to customize one without re-bundling everything:
 
 ```rust
 // In your binary (e.g., src/bin/problem.rs)
-use my_library::gcd;
 use my_library::gcd_list;
 
 // Expand and edit the gcd function inline
@@ -519,40 +496,29 @@ fn main() {
 ```
 
 In this example:
+
 - `gcd` is expanded inline (marked with `expanded!()`) and customized
 - `gcd_list` is bundled automatically from your library
 - When bundled, `gcd_list` calls your customized `gcd` function, not the library version
 
-**Use Case 2: Replacing Custom Library Dependencies with Platform Libraries**
+**Option C: Replacing Custom Library Dependencies with Platform Libraries**
 
 When your custom library depends on another custom library, but you want to use a platform library instead:
 
 ```rust
-// Suppose your custom library has a graph algorithm that depends on your custom graph structure
-// But AtCoder provides petgraph, which you want to use instead
+use superslice::*;
+use my_library::get_lower_and_upper_bound;  // This depends on a custom lower, upper bound
 
-use petgraph::Graph;
-use my_library::shortest_path;  // This depends on a custom graph structure
-
-// Mark your custom graph structure as expanded (skip bundling it)
-cargo_snippet_more::expanded!("MyGraph");
-
-// The platform library (petgraph) is available on AtCoder
-// shortest_path will now use petgraph::Graph instead of your custom MyGraph
+cargo_snippet_more::expanded!("lower_bound");
+cargo_snippet_more::expanded!("upper_bound");
 
 fn main() {
-    let graph = Graph::new();
-    // shortest_path is bundled, but uses petgraph instead of custom graph
-    let result = shortest_path(&graph, 0, 5);
-    println!("{}", result);
+  let b = [1, 3];
+
+  let (l, w) = get_lower_and_upper_bound(b);
+  println!("lower_bound: {}, upper_bound: {}", l, w);
 }
 ```
-
-**Other Platform Libraries on AtCoder:**
-- `proconio` - Input handling
-- `superslice` - Extended slice operations  
-- `petgraph` - Graph algorithms
-- `indexmap` - Ordered hash maps
 
 By marking your custom library component as `expanded!()`, you tell cargo-snippet-more to skip bundling it, allowing the platform library to be used instead.
 
@@ -561,7 +527,7 @@ By marking your custom library component as `expanded!()`, you tell cargo-snippe
 Create the bundled version:
 
 ```bash
-$ cargo-snippet-more bundle --bin a
+cargo-snippet-more bundle --bin a
 ```
 
 This generates `src/cargo-snippet-more/a.rs` with all required library code inlined. The `use` statements are commented out and the library code is appended.
@@ -617,6 +583,7 @@ fn create_test_data() -> Vec<i32> {
 ### Output Format Examples
 
 #### Neosnippet (default)
+
 ```
 snippet binary_search
     fn binary_search<T: Ord>(arr: &[T], target: &T) -> Option<usize> {
@@ -627,6 +594,7 @@ snippet binary_search
 ```
 
 #### VSCode
+
 ```json
 {
   "binary_search": {
@@ -643,6 +611,7 @@ snippet binary_search
 ```
 
 #### Ultisnips
+
 ```
 snippet binary_search
 fn binary_search<T: Ord>(arr: &[T], target: &T) -> Option<usize> {
@@ -667,6 +636,7 @@ If you're migrating from cargo-snippet, all existing snippets continue to work. 
 
 **Snippet Library Example:**
 **[Nekozuki-library](https://github.com/Nekozuki0509/Nekozuki-library)** - A competitive programming snippet library demonstrating:
+
 - Properly structured library snippets
 - Range-based snippets with `library` parameter
 - Use of `not_library` attribute where appropriate
@@ -674,6 +644,7 @@ If you're migrating from cargo-snippet, all existing snippets continue to work. 
 
 **cargo-compete Integration Example:**
 **[atcoder_rust](https://github.com/Nekozuki0509/atcoder_rust)** - A complete cargo-compete project showing:
+
 - Full Cargo.toml configuration with metadata
 - Integration with cargo-snippet-more for bundling
 - How to use library snippets in contest binaries
@@ -690,6 +661,7 @@ MIT License - Same as the original cargo-snippet project.
 Forked from [cargo-snippet](https://github.com/hatoo/cargo-snippet) by hatoo.
 
 Additional features:
+
 - Bundle functionality
 - Range-based snippets
 - Interactive placeholders
