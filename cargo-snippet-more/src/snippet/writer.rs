@@ -76,10 +76,10 @@ pub fn format_src(src: &str) -> Option<String> {
         .is_ok()
     {
         String::from_utf8(out).ok().map(|s| {
-            let replaced = s
+            let sanitized_output = s
                 .replace("\r\n", "\n")
                 .replace("#[rustfmt::skip]", "");
-            let mut lines = replaced.lines();
+            let mut lines = sanitized_output.lines();
 
             lines.next();
             lines.next_back();

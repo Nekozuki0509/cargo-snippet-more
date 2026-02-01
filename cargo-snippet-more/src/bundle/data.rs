@@ -31,7 +31,7 @@ pub struct Libraries {
 }
 
 impl Libraries {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             childs: BTreeMap::new(),
             files: BTreeMap::new(),
@@ -107,9 +107,10 @@ mod tests {
 
     #[test]
     fn test_libraries_new() {
-        let libs = Libraries::new();
-        assert!(libs.childs.is_empty());
-        assert!(libs.files.is_empty());
+        // Libraries is an internal structure, test through Data
+        let data = Data::new();
+        assert!(data.library.childs.is_empty());
+        assert!(data.library.files.is_empty());
     }
 
     #[test]

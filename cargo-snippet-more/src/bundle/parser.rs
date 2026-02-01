@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn test_get_should_bundle_with_use() {
         // This test verifies that get_should_bundle can parse use statements
-        // A full integration test would require a complete Data structure
+        // without requiring complex Data structure setup
         let content = r#"
             fn main() {
                 println!("test");
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_get_should_bundle_with_expanded_macro() {
-        // This test verifies that expanded! macros are recognized
+        // This test verifies that expanded! macros are recognized and parsed
         let content = r#"
             cargo_snippet_more::expanded!("test_fn");
             fn main() {}
@@ -262,7 +262,17 @@ mod tests {
         
         let result = get_should_bundle(&content, &data);
         assert!(result.is_ok());
-        // Should parse successfully and return empty since there are no libraries
+        // Should parse successfully
         assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_get_should_bundle_syntax_error() {
+        // Test that syntax errors are properly reported
+        let content = "fn main( {".to_string();
+        let data = BTreeMap::new();
+        
+        let result = get_should_bundle(&content, &data);
+        assert!(result.is_err());
     }
 }
