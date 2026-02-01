@@ -839,61 +839,72 @@ fn stringify_tokens(tokens: TokenStream, doc_hidden: bool) -> String {
 // Extract comment placeholder mapping from source without modifying it
 fn extract_comment_placeholders(content: &str) -> Vec<(String, String)> {
     lazy_static! {
-        // Match ps! markers
-        static ref PS_RE: Regex = Regex::new(r"/\*\s*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)\s*\*/").unwrap();
-        // Match pe! markers  
-        static ref PE_RE: Regex = Regex::new(r"/\*\s*pe!\((\d+)\)\s*\*/").unwrap();
+        // Match ps! markers - supports /* */, /* * */, etc.
+        static ref PS_RE: Regex = Regex::new(r"/\*\s*\*?\s*ps!\((\d+)(?:,\s*\|([^|]*)\|)?\)\s*\*+/").unwrap();
+        // Match pe! markers - supports /* */, /* * */, etc.
+        static ref PE_RE: Regex = Regex::new(r"/\*\s*\*?\s*pe!\((\d+)\)\s*\*+/").unwrap();
         // Match standalone p! markers
-        static ref P_RE: Regex = Regex::new(r"/\*\s*p!\((\d+)\)\s*\*/").unwrap();
+        static ref P_RE: Regex = Regex::new(r"/\*\s*\*?\s*p!\((\d+)\)\s*\*+/").unwrap();
     }
     
     let mut mappings = Vec::new();
     
-    // Collect all ps! markers with their positions
-    let ps_markers: Vec<(usize, usize, String, Option<String>)> = PS_RE
+    // Collect all ps! markers with their info
+    let ps_markers: Vec<(String, usize, usize, Option<String>)> = PS_RE
         .captures_iter(content)
         .filter_map(|cap| {
             cap.get(0).map(|m| {
                 let num = cap.get(1).unwrap().as_str().to_string();
                 let choices = cap.get(2).map(|c| c.as_str().to_string());
-                (m.start(), m.end(), num, choices)
+                (num, m.start(), m.end(), choices)
             })
         })
         .collect();
     
-    // Collect all pe! markers with their positions
-    let pe_markers: Vec<(usize, usize, String)> = PE_RE
+    // Collect all pe! markers with their info
+    let pe_markers: Vec<(String, usize, usize)> = PE_RE
         .captures_iter(content)
         .filter_map(|cap| {
             cap.get(0).map(|m| {
                 let num = cap.get(1).unwrap().as_str().to_string();
-                (m.start(), m.end(), num)
+                (num, m.start(), m.end())
             })
         })
         .collect();
     
-    // Match ps!/pe! pairs with the same number
-    for (ps_start, ps_end, ps_num, choices) in ps_markers.iter() {
+    // Match ps!/pe! pairs with the same number using regex to extract content
+    for (ps_num, ps_start, ps_end, choices) in ps_markers.iter() {
         // Find the first pe! marker with matching number that comes after this ps!
-        if let Some((pe_start, pe_end, _)) = pe_markers
+        if let Some((_, pe_start, pe_end)) = pe_markers
             .iter()
-            .find(|(start, _, pe_num)| pe_num == ps_num && start > ps_end)
+            .find(|(pe_num, start, _)| pe_num == ps_num && start > ps_end)
         {
-            let full_match = &content[*ps_start..*pe_end];
-            let inner = &content[*ps_end..*pe_start];
+            // Use regex to extract the full match and inner content
+            let full_pattern = format!(
+                r"/\*\s*\*?\s*ps!\({}\s*(?:,\s*\|[^|]*\|)?\)\s*\*+/(.*?)/\*\s*\*?\s*pe!\({}\)\s*\*+/",
+                regex::escape(ps_num),
+                regex::escape(ps_num)
+            );
             
-            let placeholder = if let Some(choice_str) = choices {
-                let choices_formatted = choice_str
-                    .split(',')
-                    .map(|s| s.trim())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("${{{}|{}|}}", ps_num, choices_formatted)
-            } else {
-                format!("${{{}:{}}}", ps_num, inner.trim())
-            };
-            
-            mappings.push((full_match.to_string(), placeholder));
+            if let Ok(re) = Regex::new(&full_pattern) {
+                if let Some(cap) = re.captures(&content[*ps_start..*pe_end]) {
+                    let full_match = cap.get(0).unwrap().as_str();
+                    let inner = cap.get(1).unwrap().as_str();
+                    
+                    let placeholder = if let Some(choice_str) = choices {
+                        let choices_formatted = choice_str
+                            .split(',')
+                            .map(|s| s.trim())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("${{{}|{}|}}", ps_num, choices_formatted)
+                    } else {
+                        format!("${{{}:{}}}", ps_num, inner.trim())
+                    };
+                    
+                    mappings.push((full_match.to_string(), placeholder));
+                }
+            }
         }
     }
     
@@ -917,10 +928,10 @@ fn extract_comment_placeholders(content: &str) -> Vec<(String, String)> {
 // Apply comment placeholder replacements to stringified content
 fn apply_comment_placeholders(mut content: String, mappings: &[(String, String)]) -> String {
     for (pattern, replacement) in mappings {
-        // For ps!/pe! pairs, extract the content between the markers
+        // For ps!/pe! pairs, extract the content between the markers using regex
         lazy_static! {
-            static ref PS_PE_EXTRACT: Regex = Regex::new(r"/\*\s*ps!\([^)]+\)\s*\*/(.*?)/\*\s*pe!\([^)]+\)\s*\*/").unwrap();
-            static ref P_EXTRACT: Regex = Regex::new(r"/\*\s*p!\([^)]+\)\s*\*/").unwrap();
+            static ref PS_PE_EXTRACT: Regex = Regex::new(r"/\*\s*\*?\s*ps!\([^)]+\)\s*\*+/(.*?)/\*\s*\*?\s*pe!\([^)]+\)\s*\*+/").unwrap();
+            static ref P_EXTRACT: Regex = Regex::new(r"/\*\s*\*?\s*p!\([^)]+\)\s*\*+/").unwrap();
         }
         
         if let Some(cap) = PS_PE_EXTRACT.captures(pattern) {
