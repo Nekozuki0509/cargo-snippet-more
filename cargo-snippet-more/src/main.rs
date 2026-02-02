@@ -24,7 +24,7 @@ lazy_static! {
     // These regex patterns are compile-time constants and known to be valid
     static ref CARGO_SNIPPET_MORE_RE: Regex = Regex::new("use cargo-snippet-more.*;")
         .expect("Failed to compile cargo-snippet-more import removal regex");
-    static ref EXPANDED_MACRO_RE: Regex = Regex::new(r#"(cargo_snippet_more::)?expanded!\(".*"\)"#)
+    static ref EXPANDED_MACRO_RE: Regex = Regex::new(r#"(cargo_snippet_more::)?expanded!\(".*"\);"#)
         .expect("Failed to compile expanded macro removal regex");
 }
 use crate::snippet::snippet::process_snippets;
@@ -165,7 +165,7 @@ fn bundle(config: BundleConfig) -> Result<()> {
         .to_string();
 
     if !bundle_content.is_empty() {
-        content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n#[allow(unused_macro_rules)]macro_rules! p{(0)=>{};($n:literal)=>{};($n:literal, |$first:tt $(,$rest:tt)*|)=>{$first};($n:literal, $($t:tt)*)=>{$($t)*};}";
+        content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n#[allow(unused_macros)]macro_rules! p{(0)=>{};($n:literal)=>{};($n:literal, |$first:tt $(,$rest:tt)*|)=>{$first};($n:literal, $($t:tt)*)=>{$($t)*};}";
         content += &bundle_content;
     }
 
