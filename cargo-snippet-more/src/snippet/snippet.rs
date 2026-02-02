@@ -65,7 +65,7 @@ pub fn process_snippets(
                             Lib {
                                 path: path.clone(),
                                 name: snip.name.clone(),
-                                content: content.clone(),
+                                content: String::new(),
                             },
                         );
                     }
