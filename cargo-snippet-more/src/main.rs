@@ -115,12 +115,13 @@ fn snippet(config: SnippetConfig) {
         if let Some(use_path) = report_error(result)
             && let Some(mut file) = report_error(
                 fs::File::open(&path)
-                    .with_context(|| format!("Failed to open file: {}", path.display()))
+                    .with_context(|| format!("Failed to open file: {}", path.display())),
             )
             && report_error(
                 file.read_to_string(&mut buf)
-                    .with_context(|| format!("Failed to read file: {}", path.display()))
-            ).is_some()
+                    .with_context(|| format!("Failed to read file: {}", path.display())),
+            )
+            .is_some()
             && let Some(parsed) = report_error(parse_snippet(&buf))
         {
             snippets.push((use_path, parsed));
@@ -155,12 +156,16 @@ fn bundle(config: BundleConfig) -> Result<()> {
         content = re.replace_all(&content, "/* $0 */").to_string();
     }
 
-    content = CARGO_SNIPPET_MORE_RE.replace_all(&content, "/* $0 */").to_string();
+    content = CARGO_SNIPPET_MORE_RE
+        .replace_all(&content, "/* $0 */")
+        .to_string();
 
-    content = EXPANDED_MACRO_RE.replace_all(&content, "/* $0 */").to_string();
+    content = EXPANDED_MACRO_RE
+        .replace_all(&content, "/* $0 */")
+        .to_string();
 
     if !bundle_content.is_empty() {
-        content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n";
+        content += "\n\n// The following code was expanded by `cargo-snippet-more`.\n\n#[allow(unused_macro_rules)]macro_rules! p{(0)=>{};($n:literal)=>{};($n:literal, |$first:tt $(,$rest:tt)*|)=>{$first};($n:literal, $($t:tt)*)=>{$($t)*};}";
         content += &bundle_content;
     }
 

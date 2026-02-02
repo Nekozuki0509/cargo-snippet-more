@@ -693,25 +693,6 @@ fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     })
 }
 
-fn get_snippet_from_item_recursive(item: Item) -> Vec<Snippet> {
-    let mut res = Vec::new();
-
-    if let Some(pair) = get_snippet_from_item(item.clone()) {
-        res.push(pair);
-    }
-
-    if let Item::Mod(mod_item) = item {
-        res.extend(
-            mod_item
-                .content
-                .into_iter()
-                .flat_map(|(_, items)| items.into_iter().flat_map(get_snippet_from_item_recursive)),
-        );
-    }
-
-    res
-}
-
 fn get_snippet_from_file(file: File) -> Vec<Snippet> {
     let mut res = Vec::new();
     // whole code is snippet
