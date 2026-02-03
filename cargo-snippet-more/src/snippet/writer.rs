@@ -1,7 +1,7 @@
+use lazy_static::lazy_static;
+use regex::Regex;
 use serde_derive::Serialize;
 use std::collections::BTreeMap;
-use regex::Regex;
-use lazy_static::lazy_static;
 
 /// Convert p! macros to placeholder syntax
 /// p!(0) → $0
@@ -14,40 +14,43 @@ fn convert_placeholders(src: &str) -> String {
         // Captures: p ! ( number [, rest] )
         static ref P_MACRO_RE: Regex = Regex::new(r"p\s*!\s*\(\s*(\d+)\s*(?:,\s*([^)]+))?\s*\);?").unwrap();
     }
-    
-    P_MACRO_RE.replace_all(src, |caps: &regex::Captures| {
-        let num = &caps[1];
-        
-        // Check if there's content after the number
-        if let Some(content) = caps.get(2) {
-            let content = content.as_str().trim();
-            
-            // Check if it's a choice pattern: | ... |
-            if content.starts_with('|') && content.ends_with('|') {
-                // Extract choices between pipes
-                let choices_str = &content[1..content.len()-1];
-                // Split by comma and trim each choice
-                let choices: Vec<&str> = choices_str.split(',')
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                
-                if !choices.is_empty() {
-                    return format!("${{{}|{}|}}", num, choices.join(","));
+
+    P_MACRO_RE
+        .replace_all(src, |caps: &regex::Captures| {
+            let num = &caps[1];
+
+            // Check if there's content after the number
+            if let Some(content) = caps.get(2) {
+                let content = content.as_str().trim();
+
+                // Check if it's a choice pattern: | ... |
+                if content.starts_with('|') && content.ends_with('|') {
+                    // Extract choices between pipes
+                    let choices_str = &content[1..content.len() - 1];
+                    // Split by comma and trim each choice
+                    let choices: Vec<&str> = choices_str
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+
+                    if !choices.is_empty() {
+                        return format!("${{{}|{}|}}", num, choices.join(","));
+                    }
                 }
+
+                // Otherwise it's p!(n, content) → ${n:content}
+                return format!("${{{}:{}}}", num, content);
             }
-            
-            // Otherwise it's p!(n, content) → ${n:content}
-            return format!("${{{}:{}}}", num, content);
-        }
-        
-        // p!(0) → $0 or p!(n) → ${n}
-        if num == "0" {
-            "$0".to_string()
-        } else {
-            format!("${{{}}}", num)
-        }
-    }).to_string()
+
+            // p!(0) → $0 or p!(n) → ${n}
+            if num == "0" {
+                "$0".to_string()
+            } else {
+                format!("${{{}}}", num)
+            }
+        })
+        .to_string()
 }
 
 #[derive(Serialize)]
@@ -76,16 +79,16 @@ pub fn format_src(src: &str) -> Option<String> {
         .is_ok()
     {
         String::from_utf8(out).ok().map(|s| {
-            let sanitized_output = s
-                .replace("\r\n", "\n")
-                .replace("#[rustfmt::skip]", "");
+            let sanitized_output = s.replace("\r\n", "\n").replace("#[rustfmt::skip]", "");
 
             let lines = sanitized_output.lines();
             let cnt = lines.clone().count();
-            lines.take(cnt-1)
+            lines
+                .take(cnt - 1)
                 .skip(1)
-                .map(|line| line.strip_prefix('\t').unwrap_or(line))
-                .collect::<Vec<_>>().join("\n")
+                .map(|line| line.strip_prefix("   ").unwrap_or(line))
+                .collect::<Vec<_>>()
+                .join("\n")
         })
     } else {
         None
@@ -105,7 +108,7 @@ pub fn format_src(src: &str) -> Option<String> {
         .stdout(process::Stdio::piped())
         .stderr(process::Stdio::piped())
         .spawn();
-    
+
     let mut command = match command {
         Ok(cmd) => cmd,
         Err(e) => {
@@ -136,10 +139,12 @@ pub fn format_src(src: &str) -> Option<String> {
     let cnt = lines.clone().count();
 
     Some(
-        lines.take(cnt-1)
+        lines
+            .take(cnt - 1)
             .skip(1)
-            .map(|line| line.strip_prefix('\t').unwrap_or(line))
-            .collect::<Vec<_>>().join("\n")
+            .map(|line| line.strip_prefix("    ").unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n"),
     )
 }
 
@@ -147,29 +152,29 @@ pub fn format_src(src: &str) -> Option<String> {
 fn escape_non_placeholder_dollars(line: &str) -> String {
     use regex::Regex;
     lazy_static::lazy_static! {
-        // Match placeholder patterns: $0, ${n}, ${n:...}, ${n|...|} 
+        // Match placeholder patterns: $0, ${n}, ${n:...}, ${n|...|}
         static ref PLACEHOLDER_RE: Regex = Regex::new(r"\$(?:0|\{\d+(?::[^}]*|\|[^}]*\|)?\})").unwrap();
     }
-    
+
     let mut result = String::new();
     let mut last_end = 0;
-    
+
     // Find all placeholders
     for mat in PLACEHOLDER_RE.find_iter(line) {
         // Escape dollars in the text before this placeholder
         let before = &line[last_end..mat.start()];
         result.push_str(&before.replace("$", "\\$"));
-        
+
         // Add the placeholder as-is (don't escape)
         result.push_str(mat.as_str());
-        
+
         last_end = mat.end();
     }
-    
+
     // Escape dollars in the remaining text
     let after = &line[last_end..];
     result.push_str(&after.replace("$", "\\$"));
-    
+
     result
 }
 
@@ -178,7 +183,7 @@ pub fn write_neosnippet(snippets: &BTreeMap<String, String>) {
         if let Some(formatted) = format_src(content) {
             // Convert p! macros to placeholders just before output
             let with_placeholders = convert_placeholders(&formatted);
-            
+
             println!("snippet {}", name);
             for line in with_placeholders.lines() {
                 // Neosnippet uses the same placeholder syntax as VSCode
@@ -197,7 +202,7 @@ pub fn write_vscode(snippets: &BTreeMap<String, String>) {
             format_src(content).map(|formatted| {
                 // Convert p! macros to placeholders just before output
                 let with_placeholders = convert_placeholders(&formatted);
-                
+
                 (
                     name.to_owned(),
                     VScode {
@@ -222,7 +227,7 @@ pub fn write_ultisnips(snippets: &BTreeMap<String, String>) {
         if let Some(formatted) = format_src(content) {
             // Convert p! macros to placeholders just before output
             let with_placeholders = convert_placeholders(&formatted);
-            
+
             println!("snippet {}", name);
             // Ultisnips uses ${n:default}, ${n|a,b|}, $0 syntax - same as our placeholders
             // No escaping needed
@@ -276,10 +281,7 @@ mod tests {
             convert_placeholders("p!(3, |\"read\", \"write\"|)"),
             "${3|\"read\",\"write\"|}"
         );
-        assert_eq!(
-            convert_placeholders("p!(1, |a, b, c|)"),
-            "${1|a,b,c|}"
-        );
+        assert_eq!(convert_placeholders("p!(1, |a, b, c|)"), "${1|a,b,c|}");
     }
 
     #[test]
@@ -293,13 +295,16 @@ mod tests {
     fn test_escape_non_placeholder_dollars() {
         // Normal text with $ should be escaped
         assert_eq!(escape_non_placeholder_dollars("Cost: $100"), "Cost: \\$100");
-        
+
         // Placeholders should NOT be escaped
         assert_eq!(escape_non_placeholder_dollars("$0"), "$0");
         assert_eq!(escape_non_placeholder_dollars("${1}"), "${1}");
-        assert_eq!(escape_non_placeholder_dollars("${1:default}"), "${1:default}");
+        assert_eq!(
+            escape_non_placeholder_dollars("${1:default}"),
+            "${1:default}"
+        );
         assert_eq!(escape_non_placeholder_dollars("${1|a,b|}"), "${1|a,b|}");
-        
+
         // Mixed content
         assert_eq!(
             escape_non_placeholder_dollars("Cost $100 and ${1:variable}"),
