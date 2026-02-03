@@ -12,7 +12,7 @@ fn convert_placeholders(src: &str) -> String {
     lazy_static! {
         // Match p!(...)  patterns
         // Captures: p ! ( number [, rest] )
-        static ref P_MACRO_RE: Regex = Regex::new(r"p\s*!\s*\(\s*(\d+)\s*(?:,\s*([^)]+))?\s*\)").unwrap();
+        static ref P_MACRO_RE: Regex = Regex::new(r"p\s*!\s*\(\s*(\d+)\s*(?:,\s*([^)]+))?\s*\);?").unwrap();
     }
     
     P_MACRO_RE.replace_all(src, |caps: &regex::Captures| {
@@ -79,11 +79,13 @@ pub fn format_src(src: &str) -> Option<String> {
             let sanitized_output = s
                 .replace("\r\n", "\n")
                 .replace("#[rustfmt::skip]", "");
-            let mut lines = sanitized_output.lines();
 
-            lines.next();
-            lines.next_back();
-            lines.collect::<Vec<_>>().join("\n")
+            let lines = sanitized_output.lines();
+            let cnt = lines.clone().count();
+            lines.take(cnt-1)
+                .skip(1)
+                .map(|line| line.strip_prefix('\t').unwrap_or(line))
+                .collect::<Vec<_>>().join("\n")
         })
     } else {
         None
@@ -130,13 +132,15 @@ pub fn format_src(src: &str) -> Option<String> {
     let stdout = out.stdout;
     let out = String::from_utf8(stdout).ok()?;
     let replaced = out.replace("\r\n", "\n").replace("#[rustfmt::skip]", "");
-    let mut lines = replaced.lines();
+    let lines = replaced.lines();
+    let cnt = lines.clone().count();
 
-    lines.next();
-    lines.next_back();
-
-    let formatted = lines.collect::<Vec<_>>().join("\n");
-    Some(formatted)
+    Some(
+        lines.take(cnt-1)
+            .skip(1)
+            .map(|line| line.strip_prefix('\t').unwrap_or(line))
+            .collect::<Vec<_>>().join("\n")
+    )
 }
 
 // Escape $ characters that are NOT part of placeholder syntax
