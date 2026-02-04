@@ -3,14 +3,14 @@ members = ["cargo-snippet-more", "cargo-snippet-more-macros"]
 resolver = "2"
 
 [workspace.package]
-version = "2.0.3"
+version = "0.2.2"
 authors = ["Nekozuki0509"]
 repository = "https://github.com/Nekozuki0509/cargo-snippet-more.git"
 license = "MIT"
 edition = "2024"
 
 [workspace.dependencies]
-cargo-snippet-more-macros = { version = "2.0.3", path = "cargo-snippet-more-macros" }
+cargo-snippet-more-macros = { version = "0.2.2", path = "cargo-snippet-more-macros" }
 syn = { version = "1", features = ["full", "parsing", "extra-traits", "printing", "visit", "visit-mut"] }
 quote = "1"
 proc-macro2 = "1"
