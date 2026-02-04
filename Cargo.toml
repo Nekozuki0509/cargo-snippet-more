@@ -3,7 +3,7 @@ members = ["cargo-snippet-more", "cargo-snippet-more-macros"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.3"
+version = "0.1.0"
 authors = ["Nekozuki0509"]
 repository = "https://github.com/Nekozuki0509/cargo-snippet-more.git"
 license = "MIT"
