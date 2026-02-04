@@ -2,6 +2,9 @@
 members = ["cargo-snippet-more", "cargo-snippet-more-macros"]
 resolver = "2"
 
+[workspace.metadata.release]
+tag-prefix = ""
+
 [workspace.package]
 version = "0.1.0"
 authors = ["Nekozuki0509"]
