@@ -22,7 +22,7 @@ use crate::snippet::parser::parse_snippet;
 
 lazy_static! {
     // These regex patterns are compile-time constants and known to be valid
-    static ref CARGO_SNIPPET_MORE_RE: Regex = Regex::new("use cargo-snippet-more.*;")
+    static ref CARGO_SNIPPET_MORE_RE: Regex = Regex::new("(?s)use cargo-snippet-more.*?;")
         .expect("Failed to compile cargo-snippet-more import removal regex");
     static ref EXPANDED_MACRO_RE: Regex = Regex::new(r#"(cargo_snippet_more::)?expanded!\(".*"\);"#)
         .expect("Failed to compile expanded macro removal regex");
@@ -150,7 +150,7 @@ fn bundle(config: BundleConfig) -> Result<()> {
         // Escape the module name to handle special regex characters, then build complete pattern
         let escaped_name = regex::escape(name);
         // Match "use <module>::..." or "use <module>;" patterns
-        let pattern = format!(r"use\s+{}(?:::.*)?;", escaped_name);
+        let pattern = format!(r"(?s)use\s+{}(?:::.*?)?;", escaped_name);
         let re = Regex::new(&pattern)
             .with_context(|| format!("Failed to create regex for module: {}", name))?;
         content = re.replace_all(&content, "/* $0 */").to_string();
