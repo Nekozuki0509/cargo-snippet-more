@@ -49,7 +49,7 @@ Add dependency to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cargo-snippet-more = "0.2"
+cargo-snippet-more = "0.1"
 ```
 
 Write snippet code with tests:
