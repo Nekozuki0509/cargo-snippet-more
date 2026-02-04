@@ -10,7 +10,7 @@ license = "MIT"
 edition = "2024"
 
 [workspace.dependencies]
-cargo-snippet-more-macros = { version = "0.2.3", path = "cargo-snippet-more-macros" }
+cargo-snippet-more-macros = { version = "0.1.0", path = "cargo-snippet-more-macros" }
 syn = { version = "1", features = ["full", "parsing", "extra-traits", "printing", "visit", "visit-mut"] }
 quote = "1"
 proc-macro2 = "1"
