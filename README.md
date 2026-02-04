@@ -357,7 +357,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cargo-snippet-more = "0.2"
+cargo-snippet-more = "0.1"
 # Add your custom library (adjust path as needed)
 my-library = { path = "../my-library" }
 
