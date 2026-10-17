@@ -78,10 +78,6 @@ pub fn process_snippets(
                     let l = libs.entry(name.clone()).or_default();
                     l.content += &snip.attrs.prefix;
                     l.content += &content;
-
-                    if l.path.is_empty() {
-                        dbg!(&l.content);
-                    }
                 }
 
                 let s = pre.entry(name.clone()).or_default();
