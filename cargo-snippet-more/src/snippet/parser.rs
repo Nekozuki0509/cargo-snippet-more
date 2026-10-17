@@ -101,6 +101,7 @@ impl<'a> Visit<'a> for MacroVisitor {
             let content = stringify_tokens(file, params.doc_hidden);
 
             self.snippets.push(Snippet {
+                should_root: false,
                 name: name,
                 content,
                 attrs: params,
@@ -308,6 +309,10 @@ macro_rules! get_default_snippet_name_impl {
 }
 
 fn get_default_snippet_name(item: &Item) -> Option<String> {
+    if let Item::Macro(m) = item {
+        return m.ident.as_ref().map(|i| i.to_string());
+    }
+
     get_default_snippet_name_impl!(
         item,
         Item::Static,
@@ -684,8 +689,10 @@ fn get_snippet_from_item(mut item: Item) -> Option<Snippet> {
     snip_attrs.map(|attrs| {
         remove_snippet_attr(&mut item);
         let doc_hidden = attrs.doc_hidden;
+        let should_root = matches!(item, Item::Macro(_));
         let content = stringify_tokens(item.into_token_stream(), doc_hidden);
         Snippet {
+            should_root,
             name: default_name.unwrap_or_default(),
             attrs,
             content,
@@ -709,6 +716,7 @@ fn get_snippet_from_file(file: File) -> Vec<Snippet> {
         let doc_hidden = attrs.doc_hidden;
         let content = stringify_tokens(file.into_token_stream(), doc_hidden);
         res.push(Snippet {
+            should_root: false,
             name: String::new(),
             attrs,
             content,
