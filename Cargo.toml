@@ -6,7 +6,7 @@ resolver = "2"
 tag-prefix = ""
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Nekozuki0509"]
 repository = "https://github.com/Nekozuki0509/cargo-snippet-more.git"
 license = "MIT"
